@@ -1,0 +1,23 @@
+[package]
+name = "sbits"
+version = "0.1.0"
+authors = ["Arc <attobop@gmail.com>"]
+edition = "2021"
+description = "Succinct data structures: near-optimal space with efficient queries."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/arclabs561/sbits"
+readme = "README.md"
+keywords = ["succinct", "bitvec", "rank-select"]
+categories = ["data-structures", "algorithms"]
+
+[dependencies]
+# Core
+thiserror = "2.0"
+
+[dev-dependencies]
+proptest = "1.5"
+criterion = "0.5"
+
+[[bench]]
+name = "succ_bench"
+harness = false
