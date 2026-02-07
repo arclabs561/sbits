@@ -15,6 +15,7 @@ use crate::bitvec::BitVector;
 use crate::error::{Error, Result};
 
 /// Elias-Fano encoding structure.
+#[derive(Debug, Clone)]
 pub struct EliasFano {
     universe_size: u32,
     upper_bits: BitVector,
@@ -202,9 +203,21 @@ impl EliasFano {
 
         let universe_size = u32::from_le_bytes(take(4)?.try_into().unwrap());
         let l = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
+        if l > 31 {
+            return Err(Error::InvalidEncoding(format!(
+                "EliasFano l={l} exceeds maximum (31) for u32 values"
+            )));
+        }
         let n = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
 
         let lower_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
+        // Bound allocation against total input to prevent allocation bombs.
+        if lower_len.saturating_mul(8) > bytes.len() {
+            return Err(Error::InvalidEncoding(format!(
+                "EliasFano lower_len ({lower_len}) too large for input ({} bytes)",
+                bytes.len()
+            )));
+        }
         let mut lower_bits = Vec::with_capacity(lower_len);
         for _ in 0..lower_len {
             let w = u64::from_le_bytes(take(8)?.try_into().unwrap());
@@ -246,5 +259,61 @@ mod tests {
         assert_eq!(ef.get(2).unwrap(), 30);
         assert_eq!(ef.get(3).unwrap(), 100);
         assert_eq!(ef.get(4).unwrap(), 1000);
+    }
+
+    #[test]
+    fn test_elias_fano_l_equals_zero() {
+        // l=0 when universe_size / n <= 1 (high density).
+        let values = vec![0, 1, 2, 3];
+        let ef = EliasFano::new(&values, 4);
+        assert_eq!(ef.len(), 4);
+        for (i, &v) in values.iter().enumerate() {
+            assert_eq!(ef.get(i).unwrap(), v, "mismatch at index {i}");
+        }
+    }
+
+    #[test]
+    fn test_elias_fano_serialization_roundtrip() {
+        let values = vec![10, 20, 30, 100, 1000];
+        let ef = EliasFano::new(&values, 2000);
+        let bytes = ef.to_bytes();
+        let ef2 = EliasFano::from_bytes(&bytes).unwrap();
+        assert_eq!(ef2.len(), values.len());
+        for (i, &v) in values.iter().enumerate() {
+            assert_eq!(ef2.get(i).unwrap(), v);
+        }
+    }
+
+    #[test]
+    fn test_elias_fano_l0_serialization_roundtrip() {
+        let values = vec![0, 1, 2, 3];
+        let ef = EliasFano::new(&values, 4);
+        let bytes = ef.to_bytes();
+        let ef2 = EliasFano::from_bytes(&bytes).unwrap();
+        for (i, &v) in values.iter().enumerate() {
+            assert_eq!(ef2.get(i).unwrap(), v);
+        }
+    }
+
+    #[test]
+    fn test_elias_fano_rejects_bad_l() {
+        let ef = EliasFano::new(&[10], 100);
+        let mut bytes = ef.to_bytes();
+        // Corrupt the `l` field (offset 12..16) to 32.
+        bytes[12] = 32;
+        bytes[13] = 0;
+        bytes[14] = 0;
+        bytes[15] = 0;
+        assert!(EliasFano::from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn test_elias_fano_empty() {
+        let ef = EliasFano::new(&[], 100);
+        assert!(ef.is_empty());
+        assert!(ef.get(0).is_err());
+        let bytes = ef.to_bytes();
+        let ef2 = EliasFano::from_bytes(&bytes).unwrap();
+        assert!(ef2.is_empty());
     }
 }

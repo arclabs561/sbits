@@ -14,6 +14,7 @@
 //! rank/select within that block is also available.
 
 /// A cache-oblivious succinct bit vector.
+#[derive(Clone)]
 pub struct BitVector {
     /// Interleaved data: [abs_rank, rel_ranks, data0, ..., data7, ...]
     storage: Vec<u64>,
@@ -110,16 +111,24 @@ impl BitVector {
         select0_index: Vec<u32>,
         len: usize,
     ) -> crate::error::Result<Self> {
-        // Minimal structural validation to avoid obvious panics.
+        // Structural validation to prevent OOB panics in rank/select.
         if storage.len() < 10 {
             return Err(crate::error::Error::InvalidEncoding(
-                "bitvec storage too small".to_string(),
+                "bitvec storage too small (need >= 10 words)".to_string(),
             ));
         }
         if !storage.len().is_multiple_of(10) {
             return Err(crate::error::Error::InvalidEncoding(
                 "bitvec storage len must be multiple of 10".to_string(),
             ));
+        }
+        // num_blocks = (storage.len() / 10) - 1  (last block is sentinel).
+        let num_blocks = storage.len() / 10 - 1;
+        let max_bits = num_blocks * 512;
+        if len > max_bits {
+            return Err(crate::error::Error::InvalidEncoding(format!(
+                "bitvec len ({len}) exceeds capacity of {num_blocks} blocks ({max_bits} bits)"
+            )));
         }
 
         Ok(Self {
@@ -188,6 +197,13 @@ impl BitVector {
         let len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
 
         let storage_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
+        // Bound allocation against total input to prevent allocation bombs.
+        if storage_len.saturating_mul(8) > bytes.len() {
+            return Err(crate::error::Error::InvalidEncoding(format!(
+                "bitvec storage_len ({storage_len}) too large for input ({} bytes)",
+                bytes.len()
+            )));
+        }
         let mut storage = Vec::with_capacity(storage_len);
         for _ in 0..storage_len {
             let w = u64::from_le_bytes(take(8)?.try_into().unwrap());
@@ -195,6 +211,11 @@ impl BitVector {
         }
 
         let select1_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
+        if select1_len.saturating_mul(4) > bytes.len() {
+            return Err(crate::error::Error::InvalidEncoding(format!(
+                "bitvec select1_len ({select1_len}) too large for input"
+            )));
+        }
         let mut select1_index = Vec::with_capacity(select1_len);
         for _ in 0..select1_len {
             let w = u32::from_le_bytes(take(4)?.try_into().unwrap());
@@ -202,6 +223,11 @@ impl BitVector {
         }
 
         let select0_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
+        if select0_len.saturating_mul(4) > bytes.len() {
+            return Err(crate::error::Error::InvalidEncoding(format!(
+                "bitvec select0_len ({select0_len}) too large for input"
+            )));
+        }
         let mut select0_index = Vec::with_capacity(select0_len);
         for _ in 0..select0_len {
             let w = u32::from_le_bytes(take(4)?.try_into().unwrap());
@@ -265,11 +291,8 @@ impl BitVector {
         }
 
         let word = self.storage[base + 2 + sub_block_idx];
-        let mask = if bit_offset == 64 {
-            !0u64
-        } else {
-            (1u64 << bit_offset).wrapping_sub(1)
-        };
+        // bit_offset = i % 64, so it is always in [0, 63].
+        let mask = (1u64 << bit_offset).wrapping_sub(1);
         rank += (word & mask).count_ones() as usize;
 
         rank
@@ -397,6 +420,7 @@ impl BitVector {
                 count += 1;
             }
         }
+        debug_assert!(false, "select_in_word: k ({k}) exceeds popcount of word");
         63
     }
 }
@@ -427,5 +451,35 @@ mod tests {
 
         assert_eq!(bv.select0(0), Some(2));
         assert_eq!(bv.select0(1), Some(4));
+    }
+
+    #[test]
+    fn test_bitvector_serialization_roundtrip() {
+        let data = vec![0b1011, 0b1101];
+        let bv = BitVector::new(&data, 128);
+        let bytes = bv.to_bytes();
+        let bv2 = BitVector::from_bytes(&bytes).unwrap();
+        assert_eq!(bv2.len(), 128);
+        assert_eq!(bv2.rank1(4), 3);
+        assert!(bv2.get(0));
+        assert!(!bv2.get(2));
+    }
+
+    #[test]
+    fn test_bitvector_from_parts_rejects_bad_len() {
+        // 10 words = 1 block, max 512 bits. len=513 should fail.
+        let storage = vec![0u64; 20]; // 2 blocks (1 real + sentinel)
+        assert!(BitVector::from_parts(storage.clone(), vec![], vec![], 512).is_ok());
+        assert!(BitVector::from_parts(storage, vec![], vec![], 513).is_err());
+    }
+
+    #[test]
+    fn test_bitvector_from_bytes_rejects_allocation_bomb() {
+        // Craft bytes with a huge storage_len that exceeds input size.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"SBITBV01");
+        bytes.extend_from_slice(&0u64.to_le_bytes()); // len
+        bytes.extend_from_slice(&(u64::MAX).to_le_bytes()); // storage_len = huge
+        assert!(BitVector::from_bytes(&bytes).is_err());
     }
 }

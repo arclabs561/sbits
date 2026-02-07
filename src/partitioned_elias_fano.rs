@@ -17,6 +17,7 @@ use crate::elias_fano::EliasFano;
 use crate::error::{Error, Result};
 
 /// Partitioned Elias–Fano encoding.
+#[derive(Debug, Clone)]
 pub struct PartitionedEliasFano {
     universe_size: u32,
     block_size: usize,
@@ -173,6 +174,14 @@ impl PartitionedEliasFano {
         let n = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
         let num_blocks = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
 
+        // Bound allocation against total input to prevent allocation bombs.
+        if num_blocks.saturating_mul(4) > bytes.len() {
+            return Err(Error::InvalidEncoding(format!(
+                "PEF num_blocks ({num_blocks}) too large for input ({} bytes)",
+                bytes.len()
+            )));
+        }
+
         let mut bases = Vec::with_capacity(num_blocks);
         for _ in 0..num_blocks {
             let b = u32::from_le_bytes(take(4)?.try_into().unwrap());
@@ -196,6 +205,14 @@ impl PartitionedEliasFano {
             return Err(Error::InvalidEncoding(
                 "block_size must be >= 1".to_string(),
             ));
+        }
+
+        // Validate n against block contents.
+        let actual_n: usize = blocks.iter().map(|b| b.len()).sum();
+        if actual_n != n {
+            return Err(Error::InvalidEncoding(format!(
+                "PEF n ({n}) does not match sum of block lengths ({actual_n})"
+            )));
         }
 
         Ok(Self {
@@ -227,5 +244,54 @@ mod tests {
         for (i, &v) in values.iter().enumerate() {
             assert_eq!(pef2.get(i).unwrap(), v);
         }
+    }
+
+    #[test]
+    fn partitioned_single_element() {
+        let pef = PartitionedEliasFano::new(&[42], 100, 64);
+        assert_eq!(pef.len(), 1);
+        assert_eq!(pef.get(0).unwrap(), 42);
+        let bytes = pef.to_bytes();
+        let pef2 = PartitionedEliasFano::from_bytes(&bytes).unwrap();
+        assert_eq!(pef2.get(0).unwrap(), 42);
+    }
+
+    #[test]
+    fn partitioned_empty() {
+        let pef = PartitionedEliasFano::new(&[], 100, 64);
+        assert!(pef.is_empty());
+        assert!(pef.get(0).is_err());
+    }
+
+    #[test]
+    fn partitioned_block_boundary() {
+        // block_size=3, 6 elements = exactly 2 full blocks.
+        let values = vec![0, 1, 2, 10, 11, 12];
+        let pef = PartitionedEliasFano::new(&values, 20, 3);
+        assert_eq!(pef.num_blocks(), 2);
+        for (i, &v) in values.iter().enumerate() {
+            assert_eq!(pef.get(i).unwrap(), v);
+        }
+    }
+
+    #[test]
+    fn partitioned_block_size_larger_than_n() {
+        let values = vec![5, 10, 15];
+        let pef = PartitionedEliasFano::new(&values, 20, 100);
+        assert_eq!(pef.num_blocks(), 1);
+        for (i, &v) in values.iter().enumerate() {
+            assert_eq!(pef.get(i).unwrap(), v);
+        }
+    }
+
+    #[test]
+    fn partitioned_rejects_corrupted_n() {
+        let values = vec![10, 20, 30];
+        let pef = PartitionedEliasFano::new(&values, 100, 2);
+        let mut bytes = pef.to_bytes();
+        // Corrupt the `n` field (offset 16..24) to a wrong value.
+        let bad_n: u64 = 999;
+        bytes[16..24].copy_from_slice(&bad_n.to_le_bytes());
+        assert!(PartitionedEliasFano::from_bytes(&bytes).is_err());
     }
 }

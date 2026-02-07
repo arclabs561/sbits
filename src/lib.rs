@@ -61,8 +61,9 @@
 //!
 //! This crate provides:
 //! - **`BitVector`**: Core storage with rank/select support.
-//! - **`WaveletTree`**: Rank/select over larger alphabets (planned).
-//! - **`EliasFano`**: Monotone sequences with random access (planned).
+//! - **`WaveletTree`**: Rank/select over larger alphabets.
+//! - **`EliasFano`**: Monotone sequences with random access.
+//! - **`PartitionedEliasFano`**: Block-local encoding for clustered monotone sequences.
 //!
 //! ## References
 //!
@@ -78,7 +79,6 @@ pub mod elias_fano;
 pub mod error;
 pub mod implicit;
 pub mod partitioned_elias_fano;
-pub mod rank_select;
 pub mod wavelet;
 
 pub use bitvec::BitVector;

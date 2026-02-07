@@ -105,7 +105,7 @@ impl WaveletTree {
         if let WaveletNode::Leaf { symbol } = curr {
             *symbol
         } else {
-            0
+            unreachable!("wavelet tree traversal ended at non-leaf node")
         }
     }
 
