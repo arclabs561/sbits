@@ -63,6 +63,7 @@ proptest! {
 }
 
 use sbits::elias_fano::EliasFano;
+use sbits::partitioned_elias_fano::PartitionedEliasFano;
 use sbits::wavelet::WaveletTree;
 
 proptest! {
@@ -81,6 +82,83 @@ proptest! {
 
         for (i, &expected) in values.iter().enumerate() {
             prop_assert_eq!(ef.get(i).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_elias_fano_serialization_roundtrip(
+        mut values in prop::collection::vec(0..10000u32, 1..50),
+    ) {
+        values.sort();
+        values.dedup();
+        if values.is_empty() { return Ok(()); }
+
+        let universe_size = values.last().copied().unwrap() + 100;
+        let ef = EliasFano::new(&values, universe_size);
+        let bytes = ef.to_bytes();
+        let ef2 = EliasFano::from_bytes(&bytes).unwrap();
+
+        prop_assert_eq!(ef2.len(), ef.len());
+        for i in 0..ef.len() {
+            prop_assert_eq!(ef2.get(i).unwrap(), ef.get(i).unwrap());
+        }
+    }
+
+    #[test]
+    fn test_partitioned_elias_fano_property(
+        mut values in prop::collection::vec(0..10000u32, 1..100),
+        block_size in 1usize..32,
+    ) {
+        values.sort();
+        values.dedup();
+        if values.is_empty() { return Ok(()); }
+
+        let universe_size = values.last().copied().unwrap() + 100;
+        let pef = PartitionedEliasFano::new(&values, universe_size, block_size);
+
+        prop_assert_eq!(pef.len(), values.len());
+
+        for (i, &expected) in values.iter().enumerate() {
+            prop_assert_eq!(pef.get(i).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_partitioned_elias_fano_serialization_roundtrip(
+        mut values in prop::collection::vec(0..10000u32, 1..50),
+        block_size in 1usize..32,
+    ) {
+        values.sort();
+        values.dedup();
+        if values.is_empty() { return Ok(()); }
+
+        let universe_size = values.last().copied().unwrap() + 100;
+        let pef = PartitionedEliasFano::new(&values, universe_size, block_size);
+        let bytes = pef.to_bytes();
+        let pef2 = PartitionedEliasFano::from_bytes(&bytes).unwrap();
+
+        prop_assert_eq!(pef2.len(), pef.len());
+        for i in 0..pef.len() {
+            prop_assert_eq!(pef2.get(i).unwrap(), pef.get(i).unwrap());
+        }
+    }
+
+    #[test]
+    fn test_bitvector_serialization_roundtrip(
+        bits in prop::collection::vec(any::<u64>(), 1..20),
+        len_mult in 0..64usize,
+    ) {
+        let len = (bits.len() * 64).saturating_sub(len_mult);
+        let bv = BitVector::new(&bits, len);
+        let bytes = bv.to_bytes();
+        let bv2 = BitVector::from_bytes(&bytes).unwrap();
+
+        prop_assert_eq!(bv2.len(), bv.len());
+        prop_assert_eq!(bv2.rank1(len), bv.rank1(len));
+        // Spot-check a few positions.
+        for i in (0..len).step_by(17) {
+            prop_assert_eq!(bv2.rank1(i), bv.rank1(i));
+            prop_assert_eq!(bv2.get(i), bv.get(i));
         }
     }
 
