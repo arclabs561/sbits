@@ -101,6 +101,122 @@ impl BitVector {
         }
     }
 
+    /// Reconstruct a `BitVector` from its internal parts.
+    ///
+    /// This is primarily intended for serialization round-trips.
+    pub fn from_parts(
+        storage: Vec<u64>,
+        select1_index: Vec<u32>,
+        select0_index: Vec<u32>,
+        len: usize,
+    ) -> crate::error::Result<Self> {
+        // Minimal structural validation to avoid obvious panics.
+        if storage.len() < 10 {
+            return Err(crate::error::Error::InvalidEncoding(
+                "bitvec storage too small".to_string(),
+            ));
+        }
+        if !storage.len().is_multiple_of(10) {
+            return Err(crate::error::Error::InvalidEncoding(
+                "bitvec storage len must be multiple of 10".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            storage,
+            select1_index,
+            select0_index,
+            len,
+        })
+    }
+
+    /// Serialize this bitvector to a stable binary encoding (little-endian).
+    ///
+    /// Format (versioned):
+    /// - magic: 8 bytes (`SBITBV01`)
+    /// - len: u64
+    /// - storage_len: u64, then `storage_len` u64 words
+    /// - select1_len: u64, then `select1_len` u32 words
+    /// - select0_len: u64, then `select0_len` u32 words
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"SBITBV01");
+
+        out.extend_from_slice(&(self.len as u64).to_le_bytes());
+
+        out.extend_from_slice(&(self.storage.len() as u64).to_le_bytes());
+        for &w in &self.storage {
+            out.extend_from_slice(&w.to_le_bytes());
+        }
+
+        out.extend_from_slice(&(self.select1_index.len() as u64).to_le_bytes());
+        for &w in &self.select1_index {
+            out.extend_from_slice(&w.to_le_bytes());
+        }
+
+        out.extend_from_slice(&(self.select0_index.len() as u64).to_le_bytes());
+        for &w in &self.select0_index {
+            out.extend_from_slice(&w.to_le_bytes());
+        }
+
+        out
+    }
+
+    /// Deserialize a `BitVector` from `to_bytes()` output.
+    pub fn from_bytes(bytes: &[u8]) -> crate::error::Result<Self> {
+        const MAGIC: &[u8; 8] = b"SBITBV01";
+        let mut off = 0usize;
+
+        let mut take = |n: usize| -> crate::error::Result<&[u8]> {
+            if off + n > bytes.len() {
+                return Err(crate::error::Error::InvalidEncoding(
+                    "unexpected end of input".to_string(),
+                ));
+            }
+            let slice = &bytes[off..off + n];
+            off += n;
+            Ok(slice)
+        };
+
+        let magic = take(8)?;
+        if magic != MAGIC {
+            return Err(crate::error::Error::InvalidEncoding(
+                "bad magic for BitVector".to_string(),
+            ));
+        }
+
+        let len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
+
+        let storage_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
+        let mut storage = Vec::with_capacity(storage_len);
+        for _ in 0..storage_len {
+            let w = u64::from_le_bytes(take(8)?.try_into().unwrap());
+            storage.push(w);
+        }
+
+        let select1_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
+        let mut select1_index = Vec::with_capacity(select1_len);
+        for _ in 0..select1_len {
+            let w = u32::from_le_bytes(take(4)?.try_into().unwrap());
+            select1_index.push(w);
+        }
+
+        let select0_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
+        let mut select0_index = Vec::with_capacity(select0_len);
+        for _ in 0..select0_len {
+            let w = u32::from_le_bytes(take(4)?.try_into().unwrap());
+            select0_index.push(w);
+        }
+
+        if off != bytes.len() {
+            return Err(crate::error::Error::InvalidEncoding(
+                "trailing bytes after BitVector".to_string(),
+            ));
+        }
+
+        Self::from_parts(storage, select1_index, select0_index, len)
+    }
+
     /// Return the total number of bits in the vector.
     pub fn len(&self) -> usize {
         self.len

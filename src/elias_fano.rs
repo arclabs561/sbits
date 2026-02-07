@@ -16,6 +16,7 @@ use crate::error::{Error, Result};
 
 /// Elias-Fano encoding structure.
 pub struct EliasFano {
+    universe_size: u32,
     upper_bits: BitVector,
     lower_bits: Vec<u64>,
     l: usize,
@@ -28,6 +29,7 @@ impl EliasFano {
         let n = values.len();
         if n == 0 {
             return Self {
+                universe_size,
                 upper_bits: BitVector::new(&[], 0),
                 lower_bits: Vec::new(),
                 l: 0,
@@ -87,11 +89,17 @@ impl EliasFano {
         }
 
         Self {
+            universe_size,
             upper_bits: BitVector::new(&upper_data, upper_bv_len),
             lower_bits,
             l,
             n,
         }
+    }
+
+    /// Return the universe size used to build this structure.
+    pub fn universe_size(&self) -> u32 {
+        self.universe_size
     }
 
     /// Return the number of elements.
@@ -117,20 +125,109 @@ impl EliasFano {
             .ok_or(Error::InvalidSelection(i))?;
         let high = (pos - i) as u32;
 
-        // 2. Get low bits from lower_bits
-        let start_bit = i * self.l;
-        let word_idx = start_bit / 64;
-        let bit_offset = start_bit % 64;
+        // 2. Get low bits from lower_bits.
+        //
+        // Important edge case: when `l == 0`, there is no low part and `lower_bits` is empty.
+        // (This occurs for small universes or high density where U/n <= 1.)
+        let low: u32 = if self.l == 0 {
+            0
+        } else {
+            let start_bit = i * self.l;
+            let word_idx = start_bit / 64;
+            let bit_offset = start_bit % 64;
 
-        let mut low = self.lower_bits[word_idx] >> bit_offset;
-        if bit_offset + self.l > 64 {
-            let bits_from_next = bit_offset + self.l - 64;
-            low |= (self.lower_bits[word_idx + 1] & ((1 << bits_from_next) - 1))
-                << (self.l - bits_from_next);
+            let mut low = self.lower_bits[word_idx] >> bit_offset;
+            if bit_offset + self.l > 64 {
+                let bits_from_next = bit_offset + self.l - 64;
+                low |= (self.lower_bits[word_idx + 1] & ((1 << bits_from_next) - 1))
+                    << (self.l - bits_from_next);
+            }
+            low &= (1 << self.l) - 1;
+            low as u32
+        };
+
+        Ok((high << self.l) | low)
+    }
+
+    /// Serialize this Elias–Fano structure to a stable binary encoding (little-endian).
+    ///
+    /// Format (versioned):
+    /// - magic: 8 bytes (`SBITEF01`)
+    /// - universe_size: u32
+    /// - l: u32
+    /// - n: u64
+    /// - lower_len: u64, then `lower_len` u64 words
+    /// - upper_bits: byte_len u64, then `byte_len` bytes (BitVector::to_bytes)
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"SBITEF01");
+
+        out.extend_from_slice(&self.universe_size.to_le_bytes());
+        out.extend_from_slice(&(self.l as u32).to_le_bytes());
+        out.extend_from_slice(&(self.n as u64).to_le_bytes());
+
+        out.extend_from_slice(&(self.lower_bits.len() as u64).to_le_bytes());
+        for &w in &self.lower_bits {
+            out.extend_from_slice(&w.to_le_bytes());
         }
-        low &= (1 << self.l) - 1;
 
-        Ok((high << self.l) | (low as u32))
+        let upper = self.upper_bits.to_bytes();
+        out.extend_from_slice(&(upper.len() as u64).to_le_bytes());
+        out.extend_from_slice(&upper);
+        out
+    }
+
+    /// Deserialize an Elias–Fano structure from `to_bytes()` output.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        const MAGIC: &[u8; 8] = b"SBITEF01";
+        let mut off = 0usize;
+
+        let mut take = |n: usize| -> Result<&[u8]> {
+            if off + n > bytes.len() {
+                return Err(Error::InvalidEncoding(
+                    "unexpected end of input".to_string(),
+                ));
+            }
+            let slice = &bytes[off..off + n];
+            off += n;
+            Ok(slice)
+        };
+
+        let magic = take(8)?;
+        if magic != MAGIC {
+            return Err(Error::InvalidEncoding(
+                "bad magic for EliasFano".to_string(),
+            ));
+        }
+
+        let universe_size = u32::from_le_bytes(take(4)?.try_into().unwrap());
+        let l = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
+        let n = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
+
+        let lower_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
+        let mut lower_bits = Vec::with_capacity(lower_len);
+        for _ in 0..lower_len {
+            let w = u64::from_le_bytes(take(8)?.try_into().unwrap());
+            lower_bits.push(w);
+        }
+
+        let upper_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
+        let upper_bytes = take(upper_len)?;
+        let upper_bits = BitVector::from_bytes(upper_bytes)?;
+
+        if off != bytes.len() {
+            return Err(Error::InvalidEncoding(
+                "trailing bytes after EliasFano".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            universe_size,
+            upper_bits,
+            lower_bits,
+            l,
+            n,
+        })
     }
 }
 

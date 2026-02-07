@@ -77,10 +77,12 @@ pub mod bitvec;
 pub mod elias_fano;
 pub mod error;
 pub mod implicit;
+pub mod partitioned_elias_fano;
 pub mod rank_select;
 pub mod wavelet;
 
 pub use bitvec::BitVector;
 pub use elias_fano::EliasFano;
 pub use error::Error;
+pub use partitioned_elias_fano::PartitionedEliasFano;
 pub use wavelet::WaveletTree;

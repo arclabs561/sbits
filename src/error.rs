@@ -16,6 +16,10 @@ pub enum Error {
     /// An I/O error occurred during serialization or deserialization.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// Invalid binary encoding for a succinct structure.
+    #[error("invalid encoding: {0}")]
+    InvalidEncoding(String),
 }
 
 /// A specialized Result type for succinct operations.
