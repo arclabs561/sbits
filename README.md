@@ -1,6 +1,8 @@
 # sbits
 
+[![crates.io](https://img.shields.io/crates/v/sbits.svg)](https://crates.io/crates/sbits)
 [![Documentation](https://docs.rs/sbits/badge.svg)](https://docs.rs/sbits)
+[![CI](https://github.com/arclabs561/sbits/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/sbits/actions/workflows/ci.yml)
 
 Succinct data structures: near-optimal space with efficient queries.
 
