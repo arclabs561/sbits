@@ -12,7 +12,7 @@ Dual-licensed under MIT or Apache-2.0.
 
 ```toml
 [dependencies]
-sbits = "0.1.0"
+sbits = "0.1.1"
 ```
 
 ```rust
