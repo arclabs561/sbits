@@ -26,6 +26,16 @@ pub struct EliasFano {
 
 impl EliasFano {
     /// Create a new Elias-Fano structure from a sorted sequence.
+    ///
+    /// ```
+    /// use sbits::EliasFano;
+    ///
+    /// let values = vec![10, 20, 30, 100, 1000];
+    /// let ef = EliasFano::new(&values, 2000);
+    /// assert_eq!(ef.len(), 5);
+    /// assert_eq!(ef.get(0).unwrap(), 10);
+    /// assert_eq!(ef.get(4).unwrap(), 1000);
+    /// ```
     pub fn new(values: &[u32], universe_size: u32) -> Self {
         let n = values.len();
         if n == 0 {

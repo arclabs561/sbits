@@ -36,6 +36,17 @@ impl std::fmt::Debug for BitVector {
 
 impl BitVector {
     /// Create a new BitVector from a sequence of bits.
+    ///
+    /// ```
+    /// use sbits::BitVector;
+    ///
+    /// let bits = vec![0b1011u64]; // bits 0, 1, 3 are set
+    /// let bv = BitVector::new(&bits, 64);
+    /// assert!(bv.get(0));
+    /// assert!(!bv.get(2));
+    /// assert_eq!(bv.rank1(4), 3); // three 1-bits in [0, 4)
+    /// assert_eq!(bv.select1(2), Some(3)); // third 1-bit is at position 3
+    /// ```
     pub fn new(bits: &[u64], len: usize) -> Self {
         let num_blocks = len.div_ceil(512);
         let mut storage = vec![0u64; num_blocks * 10 + 10]; // +10 for sentinel
