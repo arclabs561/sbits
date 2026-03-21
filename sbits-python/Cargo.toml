@@ -17,6 +17,7 @@ doc = false
 
 [dependencies]
 sbits_core = { path = "..", package = "sbits" }
+numpy = "0.28"
 pyo3 = "0.28"
 
 [workspace]

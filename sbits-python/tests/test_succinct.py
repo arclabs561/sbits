@@ -1,3 +1,5 @@
+import numpy as np
+
 from sbits import BitVector, EliasFano, WaveletTree
 
 
@@ -92,3 +94,61 @@ def test_empty_bitvector():
     assert bv.count_ones() == 0
     assert bv.rank(0) == 0
     assert bv.select(0) is None
+
+
+# -- numpy integration -------------------------------------------------------
+
+
+def test_bitvector_from_numpy():
+    bits = np.array([True, False, True, True, False], dtype=np.bool_)
+    bv = BitVector(bits)
+    assert len(bv) == 5
+    assert bv.rank(3) == 2
+    assert bv[0] is True
+    assert bv[1] is False
+
+
+def test_bitvector_to_numpy():
+    bv = BitVector([True, False, True])
+    arr = bv.to_numpy()
+    assert isinstance(arr, np.ndarray)
+    assert arr.dtype == np.bool_
+    assert list(arr) == [True, False, True]
+
+
+def test_bitvector_numpy_roundtrip():
+    original = np.array([True, False, True, True, False, True], dtype=np.bool_)
+    bv = BitVector(original)
+    result = bv.to_numpy()
+    np.testing.assert_array_equal(original, result)
+
+
+def test_elias_fano_from_numpy_uint32():
+    values = np.array([10, 20, 30, 100], dtype=np.uint32)
+    ef = EliasFano(values)
+    assert len(ef) == 4
+    assert ef[0] == 10
+    assert ef[3] == 100
+
+
+def test_elias_fano_from_numpy_int64():
+    values = np.array([10, 20, 30, 100], dtype=np.int64)
+    ef = EliasFano(values)
+    assert ef[0] == 10
+    assert ef[3] == 100
+
+
+def test_elias_fano_to_numpy():
+    ef = EliasFano([10, 20, 30, 100])
+    arr = ef.to_numpy()
+    assert isinstance(arr, np.ndarray)
+    assert arr.dtype == np.uint32
+    assert list(arr) == [10, 20, 30, 100]
+
+
+def test_wavelet_tree_from_numpy():
+    data = np.array([3, 1, 2, 0, 3, 0, 1, 2], dtype=np.uint32)
+    wt = WaveletTree(data, sigma=4)
+    assert len(wt) == 8
+    assert wt.access(0) == 3
+    assert wt.rank(3, 8) == 2

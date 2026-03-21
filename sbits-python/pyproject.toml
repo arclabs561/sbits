@@ -42,8 +42,12 @@ cache-keys = [
     { file = "src/**/*.rs" },
 ]
 
+[project.optional-dependencies]
+numpy = ["numpy>=1.21"]
+
 [dependency-groups]
 dev = [
+    "numpy>=1.21",
     "pytest>=7.4.4",
     "pytest-cov>=4.0.0",
     "mypy>=1.0.0",
