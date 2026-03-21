@@ -2,3 +2,8 @@
 /Cargo.lock
 .cursor/
 
+
+# Python bindings build artifacts
+sbits-python/target/
+sbits-python/.venv/
+sbits-python/Cargo.lock

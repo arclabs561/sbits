@@ -1,0 +1,23 @@
+[package]
+name = "sbits-python"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT OR Apache-2.0"
+authors = ["Arc <attobop@gmail.com>"]
+description = "Python bindings for sbits (Rust)."
+repository = "https://github.com/arclabs561/sbits"
+readme = "README.md"
+publish = false
+
+[lib]
+name = "sbits"
+crate-type = ["cdylib"]
+doc = false
+
+[dependencies]
+sbits_core = { path = "..", package = "sbits" }
+pyo3 = "0.28"
+
+[workspace]
+resolver = "2"
