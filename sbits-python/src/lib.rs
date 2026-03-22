@@ -194,6 +194,13 @@ impl EliasFano {
         } else {
             values.extract::<Vec<u32>>()?
         };
+        for i in 1..vals.len() {
+            if vals[i] < vals[i - 1] {
+                return Err(PyValueError::new_err(
+                    format!("values must be sorted: found {} before {} at index {}", vals[i - 1], vals[i], i)
+                ));
+            }
+        }
         let universe = vals.last().map(|&v| v + 1).unwrap_or(0);
         Ok(Self {
             inner: sbits_core::EliasFano::new(&vals, universe),

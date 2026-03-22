@@ -281,3 +281,16 @@ def test_partitioned_elias_fano_numpy():
     assert len(pef) == 4
     assert pef[0] == 5
     assert pef[3] == 20
+
+
+# ---------------------------------------------------------------------------
+# Bug-fix regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_sbits_elias_fano_unsorted_raises():
+    """EliasFano with unsorted input must raise ValueError."""
+    with pytest.raises(ValueError, match="values must be sorted"):
+        EliasFano([10, 5, 20])
+    with pytest.raises(ValueError, match="values must be sorted"):
+        EliasFano([1, 3, 2, 4])
