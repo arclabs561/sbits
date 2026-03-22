@@ -456,7 +456,7 @@ impl WaveletTree {
 
 #[pymodule]
 fn sbits(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add("__version__", "0.1.0")?;
+    m.add("__version__", "0.1.1")?;
     m.add_class::<BitVector>()?;
     m.add_class::<EliasFano>()?;
     m.add_class::<PartitionedEliasFano>()?;
