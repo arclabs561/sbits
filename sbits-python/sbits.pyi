@@ -23,10 +23,21 @@ class BitVector:
         """Count set bits in [0, i). O(1) time."""
         ...
 
+    def rank0(self, i: int) -> int:
+        """Count unset bits in [0, i). O(1) time."""
+        ...
+
     def select(self, k: int) -> Optional[int]:
         """Position of the k-th set bit (0-indexed). O(1) time.
 
         Returns None if k >= count_ones.
+        """
+        ...
+
+    def select0(self, k: int) -> Optional[int]:
+        """Position of the k-th unset bit (0-indexed). O(1) time.
+
+        Returns None if k >= count_zeros.
         """
         ...
 
@@ -40,6 +51,15 @@ class BitVector:
 
     def to_numpy(self) -> NDArray[np.bool_]:
         """Export all bits as a numpy boolean array."""
+        ...
+
+    def to_bytes(self) -> bytes:
+        """Serialize to a stable binary encoding."""
+        ...
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "BitVector":
+        """Deserialize from bytes produced by ``to_bytes()``."""
         ...
 
     def __len__(self) -> int: ...
@@ -75,9 +95,55 @@ class EliasFano:
         """Export all values as a numpy uint32 array."""
         ...
 
+    def to_bytes(self) -> bytes:
+        """Serialize to a stable binary encoding."""
+        ...
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "EliasFano":
+        """Deserialize from bytes produced by ``to_bytes()``."""
+        ...
+
     def len(self) -> int: ...
     def __len__(self) -> int: ...
     def __contains__(self, value: int) -> bool: ...
+    def __getitem__(self, i: int) -> int: ...
+    def __repr__(self) -> str: ...
+
+class PartitionedEliasFano:
+    """Partitioned Elias-Fano encoding for clustered monotone sequences.
+
+    Splits the sequence into blocks with local universes for better compression.
+    """
+
+    def __init__(
+        self,
+        values: Union[NDArray[np.uint32], NDArray[np.int64], list[int]],
+        block_size: int = 128,
+    ) -> None:
+        """Construct from a sorted sequence.
+
+        Args:
+            values: Sorted values as numpy array (uint32 or int64) or list.
+            block_size: Maximum number of items per block (default 128).
+        """
+        ...
+
+    def get(self, i: int) -> int:
+        """Return the value at index i. O(1) time."""
+        ...
+
+    def to_bytes(self) -> bytes:
+        """Serialize to a stable binary encoding."""
+        ...
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "PartitionedEliasFano":
+        """Deserialize from bytes produced by ``to_bytes()``."""
+        ...
+
+    def len(self) -> int: ...
+    def __len__(self) -> int: ...
     def __getitem__(self, i: int) -> int: ...
     def __repr__(self) -> str: ...
 

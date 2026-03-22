@@ -1,7 +1,7 @@
-use numpy::ndarray::Array1;
 use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::PyIndexError;
+use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyType;
 
 // ---------------------------------------------------------------------------
 // BitVector
@@ -55,11 +55,23 @@ impl BitVector {
         self.inner.rank1(i)
     }
 
+    /// Count unset bits in [0, i). O(1) time.
+    fn rank0(&self, i: usize) -> usize {
+        self.inner.rank0(i)
+    }
+
     /// Position of the k-th set bit (0-indexed). O(1) time.
     ///
     /// Returns None if k >= count_ones.
     fn select(&self, k: usize) -> Option<usize> {
         self.inner.select1(k)
+    }
+
+    /// Position of the k-th unset bit (0-indexed). O(1) time.
+    ///
+    /// Returns None if k >= count_zeros.
+    fn select0(&self, k: usize) -> Option<usize> {
+        self.inner.select0(k)
     }
 
     /// Return True if the bit at index i is set.
@@ -77,6 +89,19 @@ impl BitVector {
         let len = self.inner.len();
         let bools: Vec<bool> = (0..len).map(|i| self.inner.get(i)).collect();
         PyArray1::from_vec(py, bools)
+    }
+
+    /// Serialize to bytes for persistence or pickle support.
+    fn to_bytes(&self) -> Vec<u8> {
+        self.inner.to_bytes()
+    }
+
+    /// Deserialize from bytes produced by ``to_bytes()``.
+    #[classmethod]
+    fn from_bytes(_cls: &Bound<'_, PyType>, data: &[u8]) -> PyResult<Self> {
+        let inner = sbits_core::BitVector::from_bytes(data)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(Self { inner })
     }
 
     fn __len__(&self) -> usize {
@@ -213,6 +238,19 @@ impl EliasFano {
         Ok(PyArray1::from_vec(py, vals))
     }
 
+    /// Serialize to bytes for persistence or pickle support.
+    fn to_bytes(&self) -> Vec<u8> {
+        self.inner.to_bytes()
+    }
+
+    /// Deserialize from bytes produced by ``to_bytes()``.
+    #[classmethod]
+    fn from_bytes(_cls: &Bound<'_, PyType>, data: &[u8]) -> PyResult<Self> {
+        let inner = sbits_core::EliasFano::from_bytes(data)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(Self { inner })
+    }
+
     fn len(&self) -> usize {
         self.inner.len()
     }
@@ -238,6 +276,101 @@ impl EliasFano {
 
     fn __repr__(&self) -> String {
         format!("EliasFano(len={})", self.inner.len())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PartitionedEliasFano
+// ---------------------------------------------------------------------------
+
+/// Partitioned Elias-Fano encoding for clustered monotone sequences.
+///
+/// Splits the sequence into blocks and encodes each with its own local
+/// universe, improving compression for clustered data.
+///
+/// Construct from a sorted list or numpy array:
+///
+///     pef = PartitionedEliasFano([10, 20, 30, 31, 32, 100, 1000], block_size=3)
+///     pef[0]  # 10
+///     len(pef) # 7
+#[pyclass]
+struct PartitionedEliasFano {
+    inner: sbits_core::PartitionedEliasFano,
+}
+
+#[pymethods]
+impl PartitionedEliasFano {
+    /// Construct from a sorted sequence and block size.
+    ///
+    /// Args:
+    ///     values: Sorted values as numpy array (uint32 or int64) or list.
+    ///     block_size: Maximum number of items per block (default 128).
+    #[new]
+    #[pyo3(signature = (values, block_size=128))]
+    fn new(values: &Bound<'_, PyAny>, block_size: usize) -> PyResult<Self> {
+        let vals: Vec<u32> = if let Ok(arr) = values.extract::<PyReadonlyArray1<u32>>() {
+            arr.as_array().to_vec()
+        } else if let Ok(arr) = values.extract::<PyReadonlyArray1<i64>>() {
+            arr.as_array()
+                .iter()
+                .map(|&v| {
+                    u32::try_from(v).map_err(|_| {
+                        pyo3::exceptions::PyOverflowError::new_err(format!(
+                            "value {v} out of u32 range"
+                        ))
+                    })
+                })
+                .collect::<PyResult<Vec<u32>>>()?
+        } else {
+            values.extract::<Vec<u32>>()?
+        };
+        let universe = vals.last().map(|&v| v + 1).unwrap_or(0);
+        Ok(Self {
+            inner: sbits_core::PartitionedEliasFano::new(&vals, universe, block_size),
+        })
+    }
+
+    /// Return the value at index i. O(1) time.
+    fn get(&self, i: usize) -> PyResult<u32> {
+        self.inner
+            .get(i)
+            .map_err(|e| PyIndexError::new_err(e.to_string()))
+    }
+
+    /// Serialize to bytes for persistence or pickle support.
+    fn to_bytes(&self) -> Vec<u8> {
+        self.inner.to_bytes()
+    }
+
+    /// Deserialize from bytes produced by ``to_bytes()``.
+    #[classmethod]
+    fn from_bytes(_cls: &Bound<'_, PyType>, data: &[u8]) -> PyResult<Self> {
+        let inner = sbits_core::PartitionedEliasFano::from_bytes(data)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __getitem__(&self, i: isize) -> PyResult<u32> {
+        let len = self.inner.len() as isize;
+        let idx = if i < 0 { len + i } else { i };
+        if idx < 0 || idx >= len {
+            return Err(PyIndexError::new_err("index out of range"));
+        }
+        self.inner
+            .get(idx as usize)
+            .map_err(|e| PyIndexError::new_err(e.to_string()))
+    }
+
+    fn __repr__(&self) -> String {
+        format!("PartitionedEliasFano(len={})", self.inner.len())
     }
 }
 
@@ -319,6 +452,7 @@ fn sbits(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", "0.1.0")?;
     m.add_class::<BitVector>()?;
     m.add_class::<EliasFano>()?;
+    m.add_class::<PartitionedEliasFano>()?;
     m.add_class::<WaveletTree>()?;
     Ok(())
 }

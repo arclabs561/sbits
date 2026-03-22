@@ -1,6 +1,7 @@
 import numpy as np
+import pytest
 
-from sbits import BitVector, EliasFano, WaveletTree
+from sbits import BitVector, EliasFano, PartitionedEliasFano, WaveletTree
 
 
 def test_bitvector_rank():
@@ -168,3 +169,115 @@ def test_bitvector_iter():
     bits = [True, False, True, True, False]
     bv = BitVector(bits)
     assert list(bv) == bits
+
+
+# -- rank0 / select0 --------------------------------------------------------
+
+
+def test_bitvector_rank0():
+    # bits: T F T T F T -> zeros at positions 1 and 4
+    bv = BitVector([True, False, True, True, False, True])
+    assert bv.rank0(0) == 0
+    assert bv.rank0(1) == 0  # bit 0 is set -> 0 zeros in [0,1)
+    assert bv.rank0(2) == 1  # bit 1 is unset -> 1 zero in [0,2)
+    assert bv.rank0(5) == 2  # zeros at positions 1 and 4 -> 2 zeros in [0,5)
+    assert bv.rank0(6) == 2
+
+
+def test_bitvector_select0():
+    bv = BitVector([True, False, True, True, False, True])
+    # zeros at positions 1 and 4
+    assert bv.select0(0) == 1
+    assert bv.select0(1) == 4
+    assert bv.select0(2) is None
+
+
+# -- BitVector serialization -------------------------------------------------
+
+
+def test_bitvector_serialization_roundtrip():
+    bits = [True, False, True, True, False, True, False, False, True]
+    bv = BitVector(bits)
+    data = bv.to_bytes()
+    assert isinstance(data, bytes)
+    bv2 = BitVector.from_bytes(data)
+    assert len(bv2) == len(bv)
+    assert bv2.count_ones() == bv.count_ones()
+    for i in range(len(bv)):
+        assert bv2[i] == bv[i]
+
+
+def test_bitvector_from_bytes_rejects_bad_data():
+    with pytest.raises(ValueError):
+        BitVector.from_bytes(b"not valid data")
+
+
+# -- EliasFano serialization -------------------------------------------------
+
+
+def test_elias_fano_serialization_roundtrip():
+    values = [10, 20, 30, 100, 1000]
+    ef = EliasFano(values)
+    data = ef.to_bytes()
+    assert isinstance(data, bytes)
+    ef2 = EliasFano.from_bytes(data)
+    assert len(ef2) == len(ef)
+    for i in range(len(ef)):
+        assert ef2[i] == ef[i]
+
+
+def test_elias_fano_from_bytes_rejects_bad_data():
+    with pytest.raises(ValueError):
+        EliasFano.from_bytes(b"not valid data")
+
+
+# -- PartitionedEliasFano ----------------------------------------------------
+
+
+def test_partitioned_elias_fano_basic():
+    values = [10, 20, 30, 31, 32, 100, 1000]
+    pef = PartitionedEliasFano(values, block_size=3)
+    assert len(pef) == len(values)
+    for i, v in enumerate(values):
+        assert pef.get(i) == v
+        assert pef[i] == v
+
+
+def test_partitioned_elias_fano_negative_index():
+    pef = PartitionedEliasFano([10, 20, 30])
+    assert pef[-1] == 30
+    assert pef[-3] == 10
+
+
+def test_partitioned_elias_fano_repr():
+    pef = PartitionedEliasFano([10, 20, 30])
+    assert "len=3" in repr(pef)
+
+
+def test_partitioned_elias_fano_serialization_roundtrip():
+    values = [10, 20, 30, 31, 32, 100, 1000]
+    pef = PartitionedEliasFano(values, block_size=3)
+    data = pef.to_bytes()
+    assert isinstance(data, bytes)
+    pef2 = PartitionedEliasFano.from_bytes(data)
+    assert len(pef2) == len(pef)
+    for i in range(len(pef)):
+        assert pef2[i] == pef[i]
+
+
+def test_partitioned_elias_fano_from_bytes_rejects_bad_data():
+    with pytest.raises(ValueError):
+        PartitionedEliasFano.from_bytes(b"not valid data")
+
+
+def test_partitioned_elias_fano_empty():
+    pef = PartitionedEliasFano([])
+    assert len(pef) == 0
+
+
+def test_partitioned_elias_fano_numpy():
+    values = np.array([5, 10, 15, 20], dtype=np.uint32)
+    pef = PartitionedEliasFano(values, block_size=2)
+    assert len(pef) == 4
+    assert pef[0] == 5
+    assert pef[3] == 20
