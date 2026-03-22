@@ -152,3 +152,19 @@ def test_wavelet_tree_from_numpy():
     assert len(wt) == 8
     assert wt.access(0) == 3
     assert wt.rank(3, 8) == 2
+
+
+def test_wavelet_tree_getitem():
+    data = [3, 1, 2, 0, 3, 0, 1, 2]
+    wt = WaveletTree(data, sigma=4)
+    for i, v in enumerate(data):
+        assert wt[i] == v
+    # Negative indexing.
+    assert wt[-1] == 2
+    assert wt[-8] == 3
+
+
+def test_bitvector_iter():
+    bits = [True, False, True, True, False]
+    bv = BitVector(bits)
+    assert list(bv) == bits

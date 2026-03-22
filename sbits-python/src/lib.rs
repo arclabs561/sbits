@@ -92,9 +92,39 @@ impl BitVector {
         Ok(self.inner.get(idx as usize))
     }
 
+    fn __iter__(slf: PyRef<'_, Self>) -> BitVectorIter {
+        BitVectorIter {
+            inner: slf.inner.clone(),
+            index: 0,
+        }
+    }
+
     fn __repr__(&self) -> String {
         let ones = self.inner.rank1(self.inner.len());
         format!("BitVector(len={}, ones={})", self.inner.len(), ones)
+    }
+}
+
+#[pyclass]
+struct BitVectorIter {
+    inner: sbits_core::BitVector,
+    index: usize,
+}
+
+#[pymethods]
+impl BitVectorIter {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(&mut self) -> Option<bool> {
+        if self.index < self.inner.len() {
+            let val = self.inner.get(self.index);
+            self.index += 1;
+            Some(val)
+        } else {
+            None
+        }
     }
 }
 
@@ -266,6 +296,15 @@ impl WaveletTree {
         self.inner.len()
     }
 
+    fn __getitem__(&self, i: isize) -> PyResult<u32> {
+        let len = self.inner.len() as isize;
+        let idx = if i < 0 { len + i } else { i };
+        if idx < 0 || idx >= len {
+            return Err(PyIndexError::new_err("index out of range"));
+        }
+        Ok(self.inner.access(idx as usize))
+    }
+
     fn __repr__(&self) -> String {
         format!("WaveletTree(len={})", self.inner.len())
     }
@@ -277,6 +316,7 @@ impl WaveletTree {
 
 #[pymodule]
 fn sbits(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("__version__", "0.1.0")?;
     m.add_class::<BitVector>()?;
     m.add_class::<EliasFano>()?;
     m.add_class::<WaveletTree>()?;
