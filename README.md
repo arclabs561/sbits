@@ -4,7 +4,7 @@
 [![Documentation](https://docs.rs/sbits/badge.svg)](https://docs.rs/sbits)
 [![CI](https://github.com/arclabs561/sbits/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/sbits/actions/workflows/ci.yml)
 
-Succinct data structures: near-optimal space with efficient queries.
+Succinct data structures.
 
 Dual-licensed under MIT or Apache-2.0.
 
