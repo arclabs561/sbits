@@ -8,6 +8,14 @@ Succinct data structures: near-optimal space with efficient queries.
 
 Dual-licensed under MIT or Apache-2.0.
 
+## Operations
+
+| Operation | Definition |
+|-----------|-----------|
+| $\text{rank}_1(k)$ | Number of 1-bits in positions $[0, k)$ |
+| $\text{select}_1(k)$ | Position of the $k$-th 1-bit (0-indexed) |
+| Elias-Fano | Encodes $m$ sorted integers from $[0, n)$ in $2m + m\lceil\log_2(n/m)\rceil$ bits |
+
 ## Quickstart
 
 ```toml
