@@ -12,6 +12,8 @@ readme = "README.md"
 keywords = ["succinct", "bitvec", "rank-select"]
 categories = ["data-structures", "algorithms"]
 
+[workspace]
+
 [dependencies]
 # Core
 thiserror = "2.0"
