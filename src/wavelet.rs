@@ -7,7 +7,7 @@
 //!
 //! A Wavelet Tree for a string $S$ of length $n$ over alphabet $\Sigma$:
 //! - Root node partitions $\Sigma$ into two halves $\Sigma_L, \Sigma_R$.
-//! - A bit vector at the root marks if $S[i] \in \Sigma_R$.
+//! - A bit vector at the root marks if $S\[i\] \in \Sigma_R$.
 //! - Left child is Wavelet Tree for $S$ restricted to $\Sigma_L$.
 //! - Right child is Wavelet Tree for $S$ restricted to $\Sigma_R$.
 //!
@@ -132,7 +132,12 @@ impl WaveletTree {
 
     /// Return the position of the $k$-th occurrence of `symbol`.
     pub fn select(&self, symbol: u32, k: usize) -> Option<usize> {
-        Self::select_recursive(&self.root, 0, self.sigma, symbol, k)
+        let pos = Self::select_recursive(&self.root, 0, self.sigma, symbol, k)?;
+        if pos < self.len {
+            Some(pos)
+        } else {
+            None
+        }
     }
 
     fn select_recursive(
@@ -197,5 +202,52 @@ mod tests {
         assert_eq!(wt.select(0, 1), Some(5));
         assert_eq!(wt.select(2, 1), Some(7));
         assert_eq!(wt.select(3, 2), None);
+        assert_eq!(wt.select(0, 2), None);
+        assert_eq!(wt.select(1, 2), None);
+        assert_eq!(wt.select(2, 2), None);
+    }
+
+    #[test]
+    fn test_wavelet_tree_sigma_1() {
+        let data = vec![0, 0, 0, 0];
+        let wt = WaveletTree::new(&data, 1);
+        assert_eq!(wt.len(), 4);
+        assert_eq!(wt.access(0), 0);
+        assert_eq!(wt.access(3), 0);
+        assert_eq!(wt.rank(0, 4), 4);
+        assert_eq!(wt.select(0, 0), Some(0));
+        assert_eq!(wt.select(0, 3), Some(3));
+        assert_eq!(wt.select(0, 4), None);
+    }
+
+    #[test]
+    fn test_wavelet_tree_sigma_2() {
+        let data = vec![0, 1, 0, 1, 1];
+        let wt = WaveletTree::new(&data, 2);
+        assert_eq!(wt.rank(0, 5), 2);
+        assert_eq!(wt.rank(1, 5), 3);
+        assert_eq!(wt.select(0, 0), Some(0));
+        assert_eq!(wt.select(0, 1), Some(2));
+        assert_eq!(wt.select(1, 0), Some(1));
+        assert_eq!(wt.select(1, 2), Some(4));
+    }
+
+    #[test]
+    fn test_wavelet_tree_access_all() {
+        let data = vec![3, 1, 2, 0, 3, 0, 1, 2];
+        let wt = WaveletTree::new(&data, 4);
+        for (i, &expected) in data.iter().enumerate() {
+            assert_eq!(wt.access(i), expected);
+        }
+    }
+
+    #[test]
+    fn test_wavelet_tree_distinct_ranks() {
+        // Use data where rank values are all different to avoid coincidental correctness.
+        let data = vec![0, 0, 0, 1, 1, 2];
+        let wt = WaveletTree::new(&data, 3);
+        assert_eq!(wt.rank(0, 6), 3);
+        assert_eq!(wt.rank(1, 6), 2);
+        assert_eq!(wt.rank(2, 6), 1);
     }
 }

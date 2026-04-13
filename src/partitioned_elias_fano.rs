@@ -148,66 +148,29 @@ impl PartitionedEliasFano {
 
     /// Deserialize a partitioned Elias–Fano structure from `to_bytes()` output.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        const MAGIC: &[u8; 8] = b"SBITPEF1";
-        let mut off = 0usize;
-
-        let mut take = |n: usize| -> Result<&[u8]> {
-            if off + n > bytes.len() {
-                return Err(Error::InvalidEncoding(
-                    "unexpected end of input".to_string(),
-                ));
-            }
-            let slice = &bytes[off..off + n];
-            off += n;
-            Ok(slice)
-        };
-
-        let magic = take(8)?;
-        if magic != MAGIC {
-            return Err(Error::InvalidEncoding(
-                "bad magic for PartitionedEliasFano".to_string(),
-            ));
-        }
-
-        let universe_size = u32::from_le_bytes(take(4)?.try_into().unwrap());
-        let block_size = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
-        let n = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
-        let num_blocks = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
-
-        // Bound allocation against total input to prevent allocation bombs.
-        if num_blocks.saturating_mul(4) > bytes.len() {
-            return Err(Error::InvalidEncoding(format!(
-                "PEF num_blocks ({num_blocks}) too large for input ({} bytes)",
-                bytes.len()
-            )));
-        }
-
-        let mut bases = Vec::with_capacity(num_blocks);
-        for _ in 0..num_blocks {
-            let b = u32::from_le_bytes(take(4)?.try_into().unwrap());
-            bases.push(b);
-        }
+        use crate::error::ByteReader;
+        let mut r = ByteReader::new(bytes);
+        r.read_magic(b"SBITPEF1", "PartitionedEliasFano")?;
+        let universe_size = r.read_u32()?;
+        let block_size = r.read_u32()? as usize;
+        let n = r.read_u64()? as usize;
+        let num_blocks = r.read_u64()? as usize;
+        let bases = r.read_u32_vec(num_blocks)?;
 
         let mut blocks = Vec::with_capacity(num_blocks);
         for _ in 0..num_blocks {
-            let len_bytes = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
-            let blk_bytes = take(len_bytes)?;
+            let len_bytes = r.read_u64()? as usize;
+            let blk_bytes = r.take(len_bytes)?;
             let ef = EliasFano::from_bytes(blk_bytes)?;
             blocks.push(ef);
         }
+        r.expect_eof("PartitionedEliasFano")?;
 
-        if off != bytes.len() {
-            return Err(Error::InvalidEncoding(
-                "trailing bytes after PartitionedEliasFano".to_string(),
-            ));
-        }
         if block_size == 0 {
             return Err(Error::InvalidEncoding(
                 "block_size must be >= 1".to_string(),
             ));
         }
-
-        // Validate n against block contents.
         let actual_n: usize = blocks.iter().map(|b| b.len()).sum();
         if actual_n != n {
             return Err(Error::InvalidEncoding(format!(

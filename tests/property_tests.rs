@@ -186,5 +186,95 @@ proptest! {
             }
             prop_assert_eq!(wt.rank(symbol, input.len()), expected_rank);
         }
+
+        // Check select for each symbol
+        for symbol in 0..sigma.min(20) {
+            let total = wt.rank(symbol, input.len());
+            for k in 0..total {
+                let pos = wt.select(symbol, k);
+                prop_assert!(pos.is_some(), "select({symbol}, {k}) returned None but rank is {total}");
+                let pos = pos.unwrap();
+                prop_assert!(pos < input.len());
+                prop_assert_eq!(input[pos], symbol);
+                prop_assert_eq!(wt.rank(symbol, pos), k);
+            }
+            prop_assert_eq!(wt.select(symbol, total), None);
+        }
+    }
+
+    #[test]
+    fn test_bitvector_ones_iter(
+        bits in prop::collection::vec(any::<u64>(), 1..50),
+        len_mult in 0..64usize,
+    ) {
+        let len = (bits.len() * 64).saturating_sub(len_mult);
+        let bv = BitVector::new(&bits, len);
+
+        let from_iter: Vec<usize> = bv.ones().collect();
+        let mut expected = Vec::new();
+        for i in 0..len {
+            if (bits[i / 64] & (1u64 << (i % 64))) != 0 {
+                expected.push(i);
+            }
+        }
+        prop_assert_eq!(&from_iter, &expected);
+        prop_assert_eq!(from_iter.len(), bv.rank1(len));
+    }
+
+    #[test]
+    fn test_bitvector_serialization_verifies_select(
+        bits in prop::collection::vec(any::<u64>(), 1..20),
+        len_mult in 0..64usize,
+    ) {
+        let len = (bits.len() * 64).saturating_sub(len_mult);
+        let bv = BitVector::new(&bits, len);
+        let bytes = bv.to_bytes();
+        let bv2 = BitVector::from_bytes(&bytes).unwrap();
+
+        // Verify select1 after roundtrip
+        let total_ones = bv.rank1(len);
+        for k in 0..total_ones.min(50) {
+            prop_assert_eq!(bv2.select1(k), bv.select1(k));
+        }
+        // Verify select0 after roundtrip
+        let total_zeros = bv.rank0(len);
+        for k in 0..total_zeros.min(50) {
+            prop_assert_eq!(bv2.select0(k), bv.select0(k));
+        }
+    }
+
+    #[test]
+    fn test_elias_fano_predecessor_successor(
+        mut values in prop::collection::vec(0..10000u32, 1..100),
+    ) {
+        values.sort();
+        values.dedup();
+        if values.is_empty() { return Ok(()); }
+
+        let universe_size = values.last().copied().unwrap() + 100;
+        let ef = EliasFano::new(&values, universe_size);
+
+        // Successor of each value is itself
+        for &v in &values {
+            prop_assert_eq!(ef.successor(v), Some(v));
+            prop_assert_eq!(ef.predecessor(v), Some(v));
+        }
+
+        // Successor of 0 is first value (or None if first > 0)
+        if values[0] == 0 {
+            prop_assert_eq!(ef.successor(0), Some(0));
+        } else {
+            prop_assert_eq!(ef.successor(0), Some(values[0]));
+            prop_assert_eq!(ef.predecessor(0), None);
+        }
+
+        // Successor past the end is None
+        let last = *values.last().unwrap();
+        prop_assert_eq!(ef.successor(last + 1), None);
+        prop_assert_eq!(ef.predecessor(last + 1), Some(last));
+
+        // Iterator produces all values in order
+        let from_iter: Vec<u32> = ef.iter().collect();
+        prop_assert_eq!(&from_iter, &values);
     }
 }

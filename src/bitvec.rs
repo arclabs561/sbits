@@ -184,73 +184,17 @@ impl BitVector {
 
     /// Deserialize a `BitVector` from `to_bytes()` output.
     pub fn from_bytes(bytes: &[u8]) -> crate::error::Result<Self> {
-        const MAGIC: &[u8; 8] = b"SBITBV01";
-        let mut off = 0usize;
-
-        let mut take = |n: usize| -> crate::error::Result<&[u8]> {
-            if off + n > bytes.len() {
-                return Err(crate::error::Error::InvalidEncoding(
-                    "unexpected end of input".to_string(),
-                ));
-            }
-            let slice = &bytes[off..off + n];
-            off += n;
-            Ok(slice)
-        };
-
-        let magic = take(8)?;
-        if magic != MAGIC {
-            return Err(crate::error::Error::InvalidEncoding(
-                "bad magic for BitVector".to_string(),
-            ));
-        }
-
-        let len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
-
-        let storage_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
-        // Bound allocation against total input to prevent allocation bombs.
-        if storage_len.saturating_mul(8) > bytes.len() {
-            return Err(crate::error::Error::InvalidEncoding(format!(
-                "bitvec storage_len ({storage_len}) too large for input ({} bytes)",
-                bytes.len()
-            )));
-        }
-        let mut storage = Vec::with_capacity(storage_len);
-        for _ in 0..storage_len {
-            let w = u64::from_le_bytes(take(8)?.try_into().unwrap());
-            storage.push(w);
-        }
-
-        let select1_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
-        if select1_len.saturating_mul(4) > bytes.len() {
-            return Err(crate::error::Error::InvalidEncoding(format!(
-                "bitvec select1_len ({select1_len}) too large for input"
-            )));
-        }
-        let mut select1_index = Vec::with_capacity(select1_len);
-        for _ in 0..select1_len {
-            let w = u32::from_le_bytes(take(4)?.try_into().unwrap());
-            select1_index.push(w);
-        }
-
-        let select0_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
-        if select0_len.saturating_mul(4) > bytes.len() {
-            return Err(crate::error::Error::InvalidEncoding(format!(
-                "bitvec select0_len ({select0_len}) too large for input"
-            )));
-        }
-        let mut select0_index = Vec::with_capacity(select0_len);
-        for _ in 0..select0_len {
-            let w = u32::from_le_bytes(take(4)?.try_into().unwrap());
-            select0_index.push(w);
-        }
-
-        if off != bytes.len() {
-            return Err(crate::error::Error::InvalidEncoding(
-                "trailing bytes after BitVector".to_string(),
-            ));
-        }
-
+        use crate::error::ByteReader;
+        let mut r = ByteReader::new(bytes);
+        r.read_magic(b"SBITBV01", "BitVector")?;
+        let len = r.read_u64()? as usize;
+        let storage_len = r.read_u64()? as usize;
+        let storage = r.read_u64_vec(storage_len)?;
+        let select1_len = r.read_u64()? as usize;
+        let select1_index = r.read_u32_vec(select1_len)?;
+        let select0_len = r.read_u64()? as usize;
+        let select0_index = r.read_u32_vec(select0_len)?;
+        r.expect_eof("BitVector")?;
         Self::from_parts(storage, select1_index, select0_index, len)
     }
 
@@ -422,17 +366,138 @@ impl BitVector {
             }
         }
 
-        let mut count = 0;
-        for i in 0..64 {
-            if (word & (1 << i)) != 0 {
-                if count == k {
-                    return i;
-                }
-                count += 1;
-            }
+        // Clear the lowest set bit k times, then the lowest remaining bit is the answer.
+        let mut w = word;
+        for _ in 0..k {
+            debug_assert_ne!(w, 0, "select_in_word: k exceeds popcount");
+            w &= w.wrapping_sub(1);
         }
-        debug_assert!(false, "select_in_word: k ({k}) exceeds popcount of word");
-        63
+        debug_assert_ne!(w, 0, "select_in_word: k exceeds popcount");
+        w.trailing_zeros() as usize
+    }
+
+    /// Return an iterator over the positions of all set bits.
+    pub fn ones(&self) -> OnesIter<'_> {
+        OnesIter {
+            bv: self,
+            block: 0,
+            word_in_block: 0,
+            current_word: self.first_data_word(0),
+            base_pos: 0,
+        }
+    }
+
+    /// Return an iterator over the positions of all unset bits (up to `len`).
+    pub fn zeros(&self) -> ZerosIter<'_> {
+        ZerosIter {
+            bv: self,
+            pos: 0,
+            block: 0,
+            word_in_block: 0,
+            current_word: self.first_data_word_inverted(0),
+            base_pos: 0,
+        }
+    }
+
+    fn first_data_word(&self, block: usize) -> u64 {
+        if block * 10 + 2 < self.storage.len() {
+            self.storage[block * 10 + 2]
+        } else {
+            0
+        }
+    }
+
+    fn first_data_word_inverted(&self, block: usize) -> u64 {
+        if block * 10 + 2 < self.storage.len() {
+            !self.storage[block * 10 + 2]
+        } else {
+            0
+        }
+    }
+}
+
+/// Iterator over set-bit positions in a [`BitVector`].
+pub struct OnesIter<'a> {
+    bv: &'a BitVector,
+    block: usize,
+    word_in_block: usize,
+    current_word: u64,
+    base_pos: usize,
+}
+
+impl Iterator for OnesIter<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        loop {
+            if self.current_word != 0 {
+                let bit = self.current_word.trailing_zeros() as usize;
+                self.current_word &= self.current_word.wrapping_sub(1);
+                let pos = self.base_pos + bit;
+                if pos < self.bv.len {
+                    return Some(pos);
+                }
+                return None;
+            }
+            // Advance to next word
+            self.word_in_block += 1;
+            if self.word_in_block >= 8 {
+                self.block += 1;
+                self.word_in_block = 0;
+            }
+            let idx = self.block * 10 + 2 + self.word_in_block;
+            if idx >= self.bv.storage.len() {
+                return None;
+            }
+            self.base_pos = self.block * 512 + self.word_in_block * 64;
+            if self.base_pos >= self.bv.len {
+                return None;
+            }
+            self.current_word = self.bv.storage[idx];
+        }
+    }
+}
+
+/// Iterator over unset-bit positions in a [`BitVector`].
+pub struct ZerosIter<'a> {
+    bv: &'a BitVector,
+    pos: usize,
+    block: usize,
+    word_in_block: usize,
+    current_word: u64, // inverted: set bits = original zeros
+    base_pos: usize,
+}
+
+impl Iterator for ZerosIter<'_> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        loop {
+            if self.current_word != 0 {
+                let bit = self.current_word.trailing_zeros() as usize;
+                self.current_word &= self.current_word.wrapping_sub(1);
+                let pos = self.base_pos + bit;
+                if pos < self.bv.len {
+                    self.pos = pos + 1;
+                    return Some(pos);
+                }
+                return None;
+            }
+            self.word_in_block += 1;
+            if self.word_in_block >= 8 {
+                self.block += 1;
+                self.word_in_block = 0;
+            }
+            let idx = self.block * 10 + 2 + self.word_in_block;
+            if idx >= self.bv.storage.len() {
+                return None;
+            }
+            self.base_pos = self.block * 512 + self.word_in_block * 64;
+            if self.base_pos >= self.bv.len {
+                return None;
+            }
+            self.current_word = !self.bv.storage[idx];
+        }
     }
 }
 
@@ -486,11 +551,73 @@ mod tests {
 
     #[test]
     fn test_bitvector_from_bytes_rejects_allocation_bomb() {
-        // Craft bytes with a huge storage_len that exceeds input size.
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"SBITBV01");
-        bytes.extend_from_slice(&0u64.to_le_bytes()); // len
-        bytes.extend_from_slice(&(u64::MAX).to_le_bytes()); // storage_len = huge
+        bytes.extend_from_slice(&0u64.to_le_bytes());
+        bytes.extend_from_slice(&(u64::MAX).to_le_bytes());
         assert!(BitVector::from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn test_bitvector_empty() {
+        let bv = BitVector::new(&[], 0);
+        assert!(bv.is_empty());
+        assert_eq!(bv.len(), 0);
+        assert_eq!(bv.rank1(0), 0);
+        assert_eq!(bv.rank0(0), 0);
+        assert_eq!(bv.select1(0), None);
+        assert_eq!(bv.select0(0), None);
+        assert!(!bv.get(0));
+        assert_eq!(bv.ones().count(), 0);
+        assert_eq!(bv.zeros().count(), 0);
+    }
+
+    #[test]
+    fn test_bitvector_get_oob_returns_false() {
+        let bv = BitVector::new(&[0xFFFF], 16);
+        assert!(bv.get(0));
+        assert!(bv.get(15));
+        assert!(!bv.get(16));
+        assert!(!bv.get(1000));
+    }
+
+    #[test]
+    fn test_bitvector_cross_block_boundary() {
+        // 9 words of all-ones = 576 bits, crossing the 512-bit block boundary.
+        let data = vec![u64::MAX; 9];
+        let bv = BitVector::new(&data, 576);
+        assert_eq!(bv.rank1(512), 512);
+        assert_eq!(bv.rank1(576), 576);
+        assert_eq!(bv.select1(511), Some(511)); // last bit of first block
+        assert_eq!(bv.select1(512), Some(512)); // first bit of second block
+        assert_eq!(bv.select1(575), Some(575));
+        assert_eq!(bv.select1(576), None);
+    }
+
+    #[test]
+    fn test_bitvector_serialization_verifies_select() {
+        let data = vec![0b1011, 0b1101];
+        let bv = BitVector::new(&data, 128);
+        let bytes = bv.to_bytes();
+        let bv2 = BitVector::from_bytes(&bytes).unwrap();
+        // Verify select works after deserialization
+        assert_eq!(bv2.select1(0), bv.select1(0));
+        assert_eq!(bv2.select1(2), bv.select1(2));
+        assert_eq!(bv2.select0(0), bv.select0(0));
+        assert_eq!(bv2.select0(2), bv.select0(2));
+    }
+
+    #[test]
+    fn test_bitvector_ones_iter() {
+        let bv = BitVector::new(&[0b1011], 64);
+        let ones: Vec<usize> = bv.ones().collect();
+        assert_eq!(ones, vec![0, 1, 3]);
+    }
+
+    #[test]
+    fn test_bitvector_zeros_iter() {
+        let bv = BitVector::new(&[0b1011], 4);
+        let zeros: Vec<usize> = bv.zeros().collect();
+        assert_eq!(zeros, vec![2]);
     }
 }

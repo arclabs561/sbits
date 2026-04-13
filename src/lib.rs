@@ -77,7 +77,6 @@
 pub mod bitvec;
 pub mod elias_fano;
 pub mod error;
-pub mod implicit;
 pub mod partitioned_elias_fano;
 pub mod wavelet;
 

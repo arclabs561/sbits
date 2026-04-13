@@ -49,13 +49,9 @@ impl EliasFano {
         }
 
         // L = floor(log2(U/n))
-        let l = if n > 0 {
-            let ratio = universe_size / n as u32;
-            if ratio > 0 {
-                (31 - ratio.leading_zeros()) as usize
-            } else {
-                0
-            }
+        let ratio = universe_size / n as u32;
+        let l = if ratio > 0 {
+            (31 - ratio.leading_zeros()) as usize
         } else {
             0
         };
@@ -160,6 +156,80 @@ impl EliasFano {
         Ok((high << self.l) | low)
     }
 
+    /// Return the smallest value >= `target`, or `None` if no such value exists.
+    ///
+    /// Also known as `successor` or `next_geq` in the literature.
+    ///
+    /// ```
+    /// use sbits::EliasFano;
+    ///
+    /// let ef = EliasFano::new(&[10, 20, 30, 100, 1000], 2000);
+    /// assert_eq!(ef.successor(15), Some(20));
+    /// assert_eq!(ef.successor(20), Some(20));
+    /// assert_eq!(ef.successor(1001), None);
+    /// ```
+    pub fn successor(&self, target: u32) -> Option<u32> {
+        if self.n == 0 {
+            return None;
+        }
+        // Binary search for the first index whose value >= target.
+        let mut lo = 0usize;
+        let mut hi = self.n;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            // get() only fails on OOB, which can't happen here.
+            if self.get(mid).unwrap() < target {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        if lo < self.n {
+            Some(self.get(lo).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Return the largest value <= `target`, or `None` if no such value exists.
+    ///
+    /// Also known as `predecessor` or `prev_leq` in the literature.
+    ///
+    /// ```
+    /// use sbits::EliasFano;
+    ///
+    /// let ef = EliasFano::new(&[10, 20, 30, 100, 1000], 2000);
+    /// assert_eq!(ef.predecessor(25), Some(20));
+    /// assert_eq!(ef.predecessor(20), Some(20));
+    /// assert_eq!(ef.predecessor(9), None);
+    /// ```
+    pub fn predecessor(&self, target: u32) -> Option<u32> {
+        if self.n == 0 {
+            return None;
+        }
+        // Binary search for the last index whose value <= target.
+        let mut lo = 0usize;
+        let mut hi = self.n;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            if self.get(mid).unwrap() <= target {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        if lo > 0 {
+            Some(self.get(lo - 1).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Return an iterator over all encoded values.
+    pub fn iter(&self) -> EliasFanoIter<'_> {
+        EliasFanoIter { ef: self, idx: 0 }
+    }
+
     /// Serialize this Elias–Fano structure to a stable binary encoding (little-endian).
     ///
     /// Format (versioned):
@@ -190,59 +260,23 @@ impl EliasFano {
 
     /// Deserialize an Elias–Fano structure from `to_bytes()` output.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        const MAGIC: &[u8; 8] = b"SBITEF01";
-        let mut off = 0usize;
-
-        let mut take = |n: usize| -> Result<&[u8]> {
-            if off + n > bytes.len() {
-                return Err(Error::InvalidEncoding(
-                    "unexpected end of input".to_string(),
-                ));
-            }
-            let slice = &bytes[off..off + n];
-            off += n;
-            Ok(slice)
-        };
-
-        let magic = take(8)?;
-        if magic != MAGIC {
-            return Err(Error::InvalidEncoding(
-                "bad magic for EliasFano".to_string(),
-            ));
-        }
-
-        let universe_size = u32::from_le_bytes(take(4)?.try_into().unwrap());
-        let l = u32::from_le_bytes(take(4)?.try_into().unwrap()) as usize;
+        use crate::error::ByteReader;
+        let mut r = ByteReader::new(bytes);
+        r.read_magic(b"SBITEF01", "EliasFano")?;
+        let universe_size = r.read_u32()?;
+        let l = r.read_u32()? as usize;
         if l > 31 {
             return Err(Error::InvalidEncoding(format!(
                 "EliasFano l={l} exceeds maximum (31) for u32 values"
             )));
         }
-        let n = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
-
-        let lower_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
-        // Bound allocation against total input to prevent allocation bombs.
-        if lower_len.saturating_mul(8) > bytes.len() {
-            return Err(Error::InvalidEncoding(format!(
-                "EliasFano lower_len ({lower_len}) too large for input ({} bytes)",
-                bytes.len()
-            )));
-        }
-        let mut lower_bits = Vec::with_capacity(lower_len);
-        for _ in 0..lower_len {
-            let w = u64::from_le_bytes(take(8)?.try_into().unwrap());
-            lower_bits.push(w);
-        }
-
-        let upper_len = u64::from_le_bytes(take(8)?.try_into().unwrap()) as usize;
-        let upper_bytes = take(upper_len)?;
+        let n = r.read_u64()? as usize;
+        let lower_len = r.read_u64()? as usize;
+        let lower_bits = r.read_u64_vec(lower_len)?;
+        let upper_len = r.read_u64()? as usize;
+        let upper_bytes = r.take(upper_len)?;
         let upper_bits = BitVector::from_bytes(upper_bytes)?;
-
-        if off != bytes.len() {
-            return Err(Error::InvalidEncoding(
-                "trailing bytes after EliasFano".to_string(),
-            ));
-        }
+        r.expect_eof("EliasFano")?;
 
         Ok(Self {
             universe_size,
@@ -251,6 +285,41 @@ impl EliasFano {
             l,
             n,
         })
+    }
+}
+
+/// Iterator over values in an [`EliasFano`] structure.
+pub struct EliasFanoIter<'a> {
+    ef: &'a EliasFano,
+    idx: usize,
+}
+
+impl Iterator for EliasFanoIter<'_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        if self.idx >= self.ef.n {
+            return None;
+        }
+        let val = self.ef.get(self.idx).unwrap();
+        self.idx += 1;
+        Some(val)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.ef.n - self.idx;
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for EliasFanoIter<'_> {}
+
+impl<'a> IntoIterator for &'a EliasFano {
+    type Item = u32;
+    type IntoIter = EliasFanoIter<'a>;
+
+    fn into_iter(self) -> EliasFanoIter<'a> {
+        self.iter()
     }
 }
 

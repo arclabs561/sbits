@@ -12,15 +12,15 @@ Dual-licensed under MIT or Apache-2.0.
 
 | Operation | Definition |
 |-----------|-----------|
-| $\text{rank}_1(k)$ | Number of 1-bits in positions $[0, k)$ |
-| $\text{select}_1(k)$ | Position of the $k$-th 1-bit (0-indexed) |
-| Elias-Fano | Encodes $m$ sorted integers from $[0, n)$ in $2m + m\lceil\log_2(n/m)\rceil$ bits |
+| rank₁(*k*) | Number of 1-bits in positions \[0, *k*) |
+| select₁(*k*) | Position of the *k*-th 1-bit (0-indexed) |
+| Elias-Fano | Encodes *m* sorted integers from \[0, *n*) in 2*m* + *m*⌈log₂(*n*/*m*)⌉ bits |
 
 ## Quickstart
 
 ```toml
 [dependencies]
-sbits = "0.1.1"
+sbits = "0.1.2"
 ```
 
 ```rust
@@ -30,4 +30,13 @@ use sbits::elias_fano::EliasFano;
 let bv = BitVector::new(&[0b1011], 64);
 assert_eq!(bv.rank1(4), 3);
 assert_eq!(bv.select1(2), Some(3));
+
+// Iterate over set bits
+let ones: Vec<usize> = bv.ones().collect();
+assert_eq!(ones, vec![0, 1, 3]);
+
+// Elias-Fano with predecessor/successor
+let ef = EliasFano::new(&[10, 20, 30, 100, 1000], 2000);
+assert_eq!(ef.successor(15), Some(20));
+assert_eq!(ef.predecessor(25), Some(20));
 ```

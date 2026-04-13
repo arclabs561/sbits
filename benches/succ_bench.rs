@@ -3,7 +3,7 @@ use sbits::bitvec::BitVector;
 
 fn bench_bitvector(c: &mut Criterion) {
     let mut group = c.benchmark_group("bitvector");
-    let bits = vec![0xAAAAAAAAAAAAAAAAu64; 1000]; // 6400 bits, 50% density
+    let bits = vec![0xAAAAAAAAAAAAAAAAu64; 1000]; // 64000 bits, 50% density
     let bv = BitVector::new(&bits, 64000);
 
     group.bench_function("rank1", |b| {
