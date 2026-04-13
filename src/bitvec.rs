@@ -347,8 +347,7 @@ impl BitVector {
 
         if sub_block_idx > 0 {
             let rel_rank1 = ((relative_ranks1 >> (9 * (sub_block_idx - 1))) & 0x1FF) as usize;
-            let rel_rank0 = (sub_block_idx * 64) - rel_rank1;
-            remaining_k -= rel_rank0;
+            remaining_k -= (sub_block_idx * 64) - rel_rank1;
         }
 
         let word = !self.storage[block_idx * 10 + 2 + sub_block_idx];
@@ -588,9 +587,9 @@ mod tests {
         let bv = BitVector::new(&data, 576);
         assert_eq!(bv.rank1(512), 512);
         assert_eq!(bv.rank1(576), 576);
-        assert_eq!(bv.select1(511), Some(511)); // last bit of first block
-        assert_eq!(bv.select1(512), Some(512)); // first bit of second block
-        assert_eq!(bv.select1(575), Some(575));
+        for k in 0..576 {
+            assert_eq!(bv.select1(k), Some(k), "select1({k}) failed");
+        }
         assert_eq!(bv.select1(576), None);
     }
 
