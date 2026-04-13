@@ -1,51 +1,36 @@
-//! Wavelet Tree for arbitrary alphabets.
+//! Wavelet Matrix for arbitrary alphabets.
 //!
 //! Generalizes rank and select operations from bit vectors to
-//! sequences over larger alphabets $\Sigma$.
+//! sequences over larger alphabets. Uses a flat matrix layout
+//! (one bitvector per bit-level) instead of a recursive tree,
+//! eliminating pointer chasing for better cache performance.
 //!
-//! # Theory
-//!
-//! A Wavelet Tree for a string $S$ of length $n$ over alphabet $\Sigma$:
-//! - Root node partitions $\Sigma$ into two halves $\Sigma_L, \Sigma_R$.
-//! - A bit vector at the root marks if $S\[i\] \in \Sigma_R$.
-//! - Left child is Wavelet Tree for $S$ restricted to $\Sigma_L$.
-//! - Right child is Wavelet Tree for $S$ restricted to $\Sigma_R$.
-//!
-//! Total space: $n \log |\Sigma| + o(n \log |\Sigma|)$ bits.
-//! Queries `access`, `rank`, `select` take $O(\log |\Sigma|)$ time.
+//! Total space: `n * ceil(log2(sigma)) + o(n * log(sigma))` bits.
+//! Queries `access`, `rank`, `select` take `O(log(sigma))` time.
 
 use crate::bitvec::BitVector;
 use crate::error::{ByteReader, Error, Result};
 
-/// Wavelet Tree node.
-#[derive(Debug, Clone)]
-pub enum WaveletNode {
-    /// Internal node with a bit vector and two children.
-    Internal {
-        /// Bit vector marking right-half symbols.
-        bv: BitVector,
-        /// Left child ($\Sigma_L$).
-        left: Box<WaveletNode>,
-        /// Right child ($\Sigma_R$).
-        right: Box<WaveletNode>,
-    },
-    /// Leaf node representing a single symbol.
-    Leaf {
-        /// The symbol value.
-        symbol: u32,
-    },
-}
-
-/// Wavelet Tree structure.
+/// Wavelet Matrix over an integer alphabet.
+///
+/// Internally stores one [`BitVector`] per bit-level of the alphabet,
+/// with a "zeros boundary" per level separating left (0-bit) from right (1-bit)
+/// elements. This flat layout avoids the heap-allocated tree nodes of a
+/// traditional wavelet tree.
 #[derive(Debug, Clone)]
 pub struct WaveletTree {
-    root: WaveletNode,
+    /// One bitvector per bit-level, from MSB (index 0) to LSB.
+    levels: Vec<BitVector>,
+    /// Number of zeros at each level (boundary between left/right halves).
+    zeros: Vec<usize>,
     len: usize,
     sigma: u32,
+    /// Number of bit-levels: ceil(log2(sigma)), or 0 if sigma <= 1.
+    depth: usize,
 }
 
 impl WaveletTree {
-    /// Create a new Wavelet Tree from a sequence of symbols.
+    /// Create a new Wavelet Matrix from a sequence of symbols.
     ///
     /// # Panics
     ///
@@ -60,43 +45,57 @@ impl WaveletTree {
                 sigma
             );
         }
-        let root = Self::build(data, 0, sigma);
+
+        let depth = if sigma <= 1 {
+            0
+        } else {
+            (u32::BITS - (sigma - 1).leading_zeros()) as usize
+        };
+
+        let n = data.len();
+        let mut levels = Vec::with_capacity(depth);
+        let mut zeros = Vec::with_capacity(depth);
+
+        // Working copy of the sequence, reordered at each level.
+        let mut current: Vec<u32> = data.to_vec();
+
+        for level in 0..depth {
+            let bit_pos = depth - 1 - level; // MSB first
+            let mut bits = vec![0u64; n.div_ceil(64)];
+            let mut left = Vec::new();
+            let mut right = Vec::new();
+
+            for (i, &v) in current.iter().enumerate() {
+                if (v >> bit_pos) & 1 == 1 {
+                    bits[i / 64] |= 1u64 << (i % 64);
+                    right.push(v);
+                } else {
+                    left.push(v);
+                }
+            }
+
+            let bv = BitVector::new(&bits, n);
+            zeros.push(bv.rank0(n));
+            levels.push(bv);
+
+            // Stable partition: all 0-bit elements, then all 1-bit elements.
+            current.clear();
+            current.extend_from_slice(&left);
+            current.extend_from_slice(&right);
+        }
+
         Self {
-            root,
-            len: data.len(),
+            levels,
+            zeros,
+            len: n,
             sigma,
+            depth,
         }
     }
 
     /// Return the alphabet size.
     pub fn sigma(&self) -> u32 {
         self.sigma
-    }
-
-    fn build(data: &[u32], min: u32, max: u32) -> WaveletNode {
-        if min + 1 >= max {
-            return WaveletNode::Leaf { symbol: min };
-        }
-
-        let mid = min + (max - min) / 2;
-        let mut bits = vec![0u64; data.len().div_ceil(64)];
-        let mut left_data = Vec::new();
-        let mut right_data = Vec::new();
-
-        for (i, &v) in data.iter().enumerate() {
-            if v >= mid {
-                bits[i / 64] |= 1 << (i % 64);
-                right_data.push(v);
-            } else {
-                left_data.push(v);
-            }
-        }
-
-        let bv = BitVector::new(&bits, data.len());
-        let left = Box::new(Self::build(&left_data, min, mid));
-        let right = Box::new(Self::build(&right_data, mid, max));
-
-        WaveletNode::Internal { bv, left, right }
     }
 
     /// Return the length of the sequence.
@@ -120,49 +119,58 @@ impl WaveletTree {
             "WaveletTree::access: index {i} >= len {}",
             self.len
         );
-        let mut curr = &self.root;
-        while let WaveletNode::Internal { bv, left, right } = curr {
-            if bv.get(i) {
-                i = bv.rank1(i);
-                curr = right;
+        let mut symbol = 0u32;
+        for level in 0..self.depth {
+            let bit_pos = self.depth - 1 - level;
+            if self.levels[level].get(i) {
+                // Bit is 1: go right.
+                symbol |= 1 << bit_pos;
+                i = self.zeros[level] + self.levels[level].rank1(i);
             } else {
-                i = bv.rank0(i);
-                curr = left;
+                // Bit is 0: go left.
+                i = self.levels[level].rank0(i);
             }
         }
-        if let WaveletNode::Leaf { symbol } = curr {
-            *symbol
-        } else {
-            unreachable!("wavelet tree traversal ended at non-leaf node")
-        }
+        symbol
     }
 
-    /// Return the number of occurrences of `symbol` in the range [0, i).
+    /// Return the number of occurrences of `symbol` in the range \[0, i).
     pub fn rank(&self, symbol: u32, mut i: usize) -> usize {
-        let mut curr = &self.root;
-        let mut min = 0;
-        let mut max = self.sigma;
-
-        while let WaveletNode::Internal { bv, left, right } = curr {
-            let mid = min + (max - min) / 2;
-            if symbol >= mid {
-                i = bv.rank1(i);
-                curr = right;
-                min = mid;
+        // Track the start of the symbol's region alongside i to avoid a second traversal.
+        let mut start = 0usize;
+        for level in 0..self.depth {
+            let bit_pos = self.depth - 1 - level;
+            if (symbol >> bit_pos) & 1 == 1 {
+                start = self.zeros[level] + self.levels[level].rank1(start);
+                i = self.zeros[level] + self.levels[level].rank1(i);
             } else {
-                i = bv.rank0(i);
-                curr = left;
-                max = mid;
+                start = self.levels[level].rank0(start);
+                i = self.levels[level].rank0(i);
             }
         }
-        i
+        i - start
     }
 
-    /// Return the position of the $k$-th occurrence of `symbol`.
+    /// Return the position of the `k`-th occurrence of `symbol` (0-indexed).
     pub fn select(&self, symbol: u32, k: usize) -> Option<usize> {
-        let pos = Self::select_recursive(&self.root, 0, self.sigma, symbol, k)?;
-        if pos < self.len {
-            Some(pos)
+        // Find the position in the bottom level, then map back up.
+        let start = self.symbol_start(symbol);
+        let mut i = start + k;
+
+        // Walk back up from the bottom level.
+        for level in (0..self.depth).rev() {
+            let bit_pos = self.depth - 1 - level;
+            if (symbol >> bit_pos) & 1 == 1 {
+                // This position was in the right half (1-bit region).
+                let rank_in_right = i - self.zeros[level];
+                i = self.levels[level].select1(rank_in_right)?;
+            } else {
+                // This position was in the left half (0-bit region).
+                i = self.levels[level].select0(i)?;
+            }
+        }
+        if i < self.len {
+            Some(i)
         } else {
             None
         }
@@ -179,106 +187,73 @@ impl WaveletTree {
 
     /// Heap memory usage in bytes.
     pub fn heap_bytes(&self) -> usize {
-        Self::node_heap_bytes(&self.root)
+        self.levels.iter().map(|bv| bv.heap_bytes()).sum::<usize>()
+            + self.zeros.len() * std::mem::size_of::<usize>()
     }
 
-    fn node_heap_bytes(node: &WaveletNode) -> usize {
-        match node {
-            WaveletNode::Leaf { .. } => 0,
-            WaveletNode::Internal { bv, left, right } => {
-                bv.heap_bytes()
-                    + std::mem::size_of::<WaveletNode>() * 2 // Box overhead
-                    + Self::node_heap_bytes(left)
-                    + Self::node_heap_bytes(right)
-            }
-        }
-    }
-
-    /// Serialize this wavelet tree to a stable binary encoding.
+    /// Serialize this wavelet matrix to a stable binary encoding.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"SBITWT01");
+        out.extend_from_slice(b"SBITWM01");
         out.extend_from_slice(&(self.len as u64).to_le_bytes());
         out.extend_from_slice(&self.sigma.to_le_bytes());
-        Self::serialize_node(&self.root, &mut out);
+        out.extend_from_slice(&(self.depth as u32).to_le_bytes());
+        for level in &self.levels {
+            let bv_bytes = level.to_bytes();
+            out.extend_from_slice(&(bv_bytes.len() as u64).to_le_bytes());
+            out.extend_from_slice(&bv_bytes);
+        }
+        for &z in &self.zeros {
+            out.extend_from_slice(&(z as u64).to_le_bytes());
+        }
         out
     }
 
-    fn serialize_node(node: &WaveletNode, out: &mut Vec<u8>) {
-        match node {
-            WaveletNode::Leaf { symbol } => {
-                out.push(0u8); // tag: leaf
-                out.extend_from_slice(&symbol.to_le_bytes());
-            }
-            WaveletNode::Internal { bv, left, right } => {
-                out.push(1u8); // tag: internal
-                let bv_bytes = bv.to_bytes();
-                out.extend_from_slice(&(bv_bytes.len() as u64).to_le_bytes());
-                out.extend_from_slice(&bv_bytes);
-                Self::serialize_node(left, out);
-                Self::serialize_node(right, out);
-            }
-        }
-    }
-
-    /// Deserialize a wavelet tree from `to_bytes()` output.
+    /// Deserialize a wavelet matrix from `to_bytes()` output.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         let mut r = ByteReader::new(bytes);
-        r.read_magic(b"SBITWT01", "WaveletTree")?;
+        r.read_magic(b"SBITWM01", "WaveletMatrix")?;
         let len = r.read_u64()? as usize;
         let sigma = r.read_u32()?;
-        let root = Self::deserialize_node(&mut r)?;
-        r.expect_eof("WaveletTree")?;
-        Ok(Self { root, len, sigma })
+        let depth = r.read_u32()? as usize;
+
+        let mut levels = Vec::with_capacity(depth);
+        for _ in 0..depth {
+            let bv_len = r.read_u64()? as usize;
+            let bv_bytes = r.take(bv_len)?;
+            levels.push(BitVector::from_bytes(bv_bytes)?);
+        }
+
+        let mut zeros = Vec::with_capacity(depth);
+        for _ in 0..depth {
+            zeros.push(r.read_u64()? as usize);
+        }
+
+        r.expect_eof("WaveletMatrix")?;
+        Ok(Self {
+            levels,
+            zeros,
+            len,
+            sigma,
+            depth,
+        })
     }
 
-    fn deserialize_node(r: &mut ByteReader<'_>) -> Result<WaveletNode> {
-        let tag = r.take(1)?[0];
-        match tag {
-            0 => {
-                let symbol = r.read_u32()?;
-                Ok(WaveletNode::Leaf { symbol })
-            }
-            1 => {
-                let bv_len = r.read_u64()? as usize;
-                let bv_bytes = r.take(bv_len)?;
-                let bv = BitVector::from_bytes(bv_bytes)?;
-                let left = Box::new(Self::deserialize_node(r)?);
-                let right = Box::new(Self::deserialize_node(r)?);
-                Ok(WaveletNode::Internal { bv, left, right })
-            }
-            _ => Err(Error::InvalidEncoding(format!(
-                "WaveletTree: unknown node tag {tag}"
-            ))),
-        }
-    }
-
-    fn select_recursive(
-        node: &WaveletNode,
-        min: u32,
-        max: u32,
-        symbol: u32,
-        k: usize,
-    ) -> Option<usize> {
-        match node {
-            WaveletNode::Leaf { symbol: leaf_sym } => {
-                if *leaf_sym == symbol {
-                    Some(k)
-                } else {
-                    None
-                }
-            }
-            WaveletNode::Internal { bv, left, right } => {
-                let mid = min + (max - min) / 2;
-                if symbol >= mid {
-                    let pos = Self::select_recursive(right, mid, max, symbol, k)?;
-                    bv.select1(pos)
-                } else {
-                    let pos = Self::select_recursive(left, min, mid, symbol, k)?;
-                    bv.select0(pos)
-                }
+    /// Compute the start position of a symbol's region in the bottom level.
+    fn symbol_start(&self, symbol: u32) -> usize {
+        let mut lo = 0usize;
+        let mut hi = self.len;
+        for level in 0..self.depth {
+            let bit_pos = self.depth - 1 - level;
+            if (symbol >> bit_pos) & 1 == 1 {
+                lo = self.zeros[level] + self.levels[level].rank1(lo);
+                hi = self.zeros[level] + self.levels[level].rank1(hi);
+            } else {
+                lo = self.levels[level].rank0(lo);
+                hi = self.levels[level].rank0(hi);
             }
         }
+        lo
     }
 }
 
@@ -356,11 +331,23 @@ mod tests {
 
     #[test]
     fn test_wavelet_tree_distinct_ranks() {
-        // Use data where rank values are all different to avoid coincidental correctness.
         let data = vec![0, 0, 0, 1, 1, 2];
         let wt = WaveletTree::new(&data, 3);
         assert_eq!(wt.rank(0, 6), 3);
         assert_eq!(wt.rank(1, 6), 2);
         assert_eq!(wt.rank(2, 6), 1);
+    }
+
+    #[test]
+    fn test_wavelet_matrix_serialization() {
+        let data = vec![3, 1, 2, 0, 3, 0, 1, 2];
+        let wt = WaveletTree::new(&data, 4);
+        let bytes = wt.to_bytes();
+        let wt2 = WaveletTree::from_bytes(&bytes).unwrap();
+        assert_eq!(wt2.len(), wt.len());
+        assert_eq!(wt2.sigma(), wt.sigma());
+        for i in 0..wt.len() {
+            assert_eq!(wt2.access(i), wt.access(i));
+        }
     }
 }
