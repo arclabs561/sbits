@@ -276,5 +276,84 @@ proptest! {
         // Iterator produces all values in order
         let from_iter: Vec<u32> = ef.iter().collect();
         prop_assert_eq!(&from_iter, &values);
+
+        // Contains
+        for &v in &values {
+            prop_assert!(ef.contains(v));
+        }
+        prop_assert!(!ef.contains(universe_size - 1)); // likely not in values
+    }
+
+    #[test]
+    fn test_partitioned_elias_fano_iter(
+        mut values in prop::collection::vec(0..10000u32, 1..100),
+        block_size in 1usize..32,
+    ) {
+        values.sort();
+        values.dedup();
+        if values.is_empty() { return Ok(()); }
+
+        let universe_size = values.last().copied().unwrap() + 100;
+        let pef = PartitionedEliasFano::new(&values, universe_size, block_size);
+
+        let from_iter: Vec<u32> = pef.iter().collect();
+        prop_assert_eq!(&from_iter, &values);
+        prop_assert_eq!(pef.iter().len(), values.len());
+    }
+
+    #[test]
+    fn test_wavelet_tree_serialization_roundtrip(
+        input in prop::collection::vec(0..50u32, 1..100),
+    ) {
+        let sigma = input.iter().max().copied().unwrap_or(0) + 1;
+        let wt = WaveletTree::new(&input, sigma);
+        let bytes = wt.to_bytes();
+        let wt2 = WaveletTree::from_bytes(&bytes).unwrap();
+
+        prop_assert_eq!(wt2.len(), wt.len());
+        prop_assert_eq!(wt2.sigma(), wt.sigma());
+        for i in 0..wt.len() {
+            prop_assert_eq!(wt2.access(i), wt.access(i));
+        }
+        for symbol in 0..sigma.min(10) {
+            prop_assert_eq!(wt2.rank(symbol, input.len()), wt.rank(symbol, input.len()));
+        }
+    }
+
+    #[test]
+    fn test_bitvector_from_ones(
+        positions in prop::collection::vec(0..1000usize, 0..100),
+    ) {
+        let len = 1024;
+        let bv = BitVector::from_ones(positions.iter().copied(), len);
+        for &p in &positions {
+            if p < len {
+                prop_assert!(bv.get(p), "from_ones: bit {} should be set", p);
+            }
+        }
+        // All ones from iterator should be in the set
+        let ones: std::collections::HashSet<usize> = bv.ones().collect();
+        for &p in &positions {
+            if p < len {
+                prop_assert!(ones.contains(&p));
+            }
+        }
+    }
+
+    #[test]
+    fn test_bitvector_exact_size_iter(
+        bits in prop::collection::vec(any::<u64>(), 1..20),
+        len_mult in 0..64usize,
+    ) {
+        let len = (bits.len() * 64).saturating_sub(len_mult);
+        let bv = BitVector::new(&bits, len);
+
+        let ones_iter = bv.ones();
+        let expected_ones = bv.rank1(len);
+        prop_assert_eq!(ones_iter.len(), expected_ones);
+
+        let zeros_iter = bv.zeros();
+        let expected_zeros = bv.rank0(len);
+        prop_assert_eq!(zeros_iter.len(), expected_zeros);
     }
 }

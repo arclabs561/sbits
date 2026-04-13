@@ -36,7 +36,31 @@ impl EliasFano {
     /// assert_eq!(ef.get(0).unwrap(), 10);
     /// assert_eq!(ef.get(4).unwrap(), 1000);
     /// ```
+    /// # Panics
+    ///
+    /// Panics if `values` is not sorted in non-decreasing order, or if any value
+    /// is >= `universe_size`.
     pub fn new(values: &[u32], universe_size: u32) -> Self {
+        // Validate sorted and within universe.
+        for i in 0..values.len() {
+            assert!(
+                values[i] < universe_size,
+                "EliasFano: value {} at index {} >= universe_size {}",
+                values[i],
+                i,
+                universe_size
+            );
+            if i > 0 {
+                assert!(
+                    values[i] >= values[i - 1],
+                    "EliasFano: values not sorted at index {} ({} < {})",
+                    i,
+                    values[i],
+                    values[i - 1]
+                );
+            }
+        }
+
         let n = values.len();
         if n == 0 {
             return Self {
@@ -225,9 +249,21 @@ impl EliasFano {
         }
     }
 
+    /// Return true if `target` is in the encoded sequence.
+    ///
+    /// Uses `successor` internally: O(log n).
+    pub fn contains(&self, target: u32) -> bool {
+        self.successor(target) == Some(target)
+    }
+
     /// Return an iterator over all encoded values.
     pub fn iter(&self) -> EliasFanoIter<'_> {
         EliasFanoIter { ef: self, idx: 0 }
+    }
+
+    /// Heap memory usage in bytes.
+    pub fn heap_bytes(&self) -> usize {
+        self.upper_bits.heap_bytes() + self.lower_bits.len() * 8
     }
 
     /// Serialize this Elias–Fano structure to a stable binary encoding (little-endian).

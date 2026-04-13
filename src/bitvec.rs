@@ -113,6 +113,26 @@ impl BitVector {
         }
     }
 
+    /// Create a `BitVector` from an iterator of set-bit positions.
+    ///
+    /// ```
+    /// use sbits::BitVector;
+    ///
+    /// let bv = BitVector::from_ones([0, 1, 3, 7].into_iter(), 16);
+    /// assert_eq!(bv.rank1(4), 3);
+    /// assert_eq!(bv.select1(3), Some(7));
+    /// ```
+    pub fn from_ones(positions: impl Iterator<Item = usize>, len: usize) -> Self {
+        let num_words = len.div_ceil(64);
+        let mut bits = vec![0u64; num_words];
+        for pos in positions {
+            if pos < len {
+                bits[pos / 64] |= 1u64 << (pos % 64);
+            }
+        }
+        Self::new(&bits, len)
+    }
+
     /// Reconstruct a `BitVector` from its internal parts.
     ///
     /// This is primarily intended for serialization round-trips.
@@ -208,11 +228,9 @@ impl BitVector {
         self.len == 0
     }
 
-    /// Approximate heap memory usage in bytes.
+    /// Heap memory usage in bytes.
     pub fn heap_bytes(&self) -> usize {
-        self.storage.capacity() * 8
-            + self.select1_index.capacity() * 4
-            + self.select0_index.capacity() * 4
+        self.storage.len() * 8 + self.select1_index.len() * 4 + self.select0_index.len() * 4
     }
 
     /// Return true if the bit at index `i` is set.
@@ -379,6 +397,7 @@ impl BitVector {
     pub fn ones(&self) -> OnesIter<'_> {
         OnesIter {
             bv: self,
+            remaining: self.rank1(self.len),
             block: 0,
             word_in_block: 0,
             current_word: self.first_data_word(0),
@@ -390,7 +409,7 @@ impl BitVector {
     pub fn zeros(&self) -> ZerosIter<'_> {
         ZerosIter {
             bv: self,
-            pos: 0,
+            remaining: self.rank0(self.len),
             block: 0,
             word_in_block: 0,
             current_word: self.first_data_word_inverted(0),
@@ -418,6 +437,7 @@ impl BitVector {
 /// Iterator over set-bit positions in a [`BitVector`].
 pub struct OnesIter<'a> {
     bv: &'a BitVector,
+    remaining: usize,
     block: usize,
     word_in_block: usize,
     current_word: u64,
@@ -434,11 +454,11 @@ impl Iterator for OnesIter<'_> {
                 self.current_word &= self.current_word.wrapping_sub(1);
                 let pos = self.base_pos + bit;
                 if pos < self.bv.len {
+                    self.remaining -= 1;
                     return Some(pos);
                 }
                 return None;
             }
-            // Advance to next word
             self.word_in_block += 1;
             if self.word_in_block >= 8 {
                 self.block += 1;
@@ -455,15 +475,21 @@ impl Iterator for OnesIter<'_> {
             self.current_word = self.bv.storage[idx];
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
 }
+
+impl ExactSizeIterator for OnesIter<'_> {}
 
 /// Iterator over unset-bit positions in a [`BitVector`].
 pub struct ZerosIter<'a> {
     bv: &'a BitVector,
-    pos: usize,
+    remaining: usize,
     block: usize,
     word_in_block: usize,
-    current_word: u64, // inverted: set bits = original zeros
+    current_word: u64,
     base_pos: usize,
 }
 
@@ -477,7 +503,7 @@ impl Iterator for ZerosIter<'_> {
                 self.current_word &= self.current_word.wrapping_sub(1);
                 let pos = self.base_pos + bit;
                 if pos < self.bv.len {
-                    self.pos = pos + 1;
+                    self.remaining -= 1;
                     return Some(pos);
                 }
                 return None;
@@ -498,7 +524,13 @@ impl Iterator for ZerosIter<'_> {
             self.current_word = !self.bv.storage[idx];
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
+    }
 }
+
+impl ExactSizeIterator for ZerosIter<'_> {}
 
 #[cfg(test)]
 mod tests {

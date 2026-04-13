@@ -15,9 +15,10 @@
 //! Queries `access`, `rank`, `select` take $O(\log |\Sigma|)$ time.
 
 use crate::bitvec::BitVector;
+use crate::error::{ByteReader, Error, Result};
 
 /// Wavelet Tree node.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum WaveletNode {
     /// Internal node with a bit vector and two children.
     Internal {
@@ -36,7 +37,7 @@ pub enum WaveletNode {
 }
 
 /// Wavelet Tree structure.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct WaveletTree {
     root: WaveletNode,
     len: usize,
@@ -45,13 +46,31 @@ pub struct WaveletTree {
 
 impl WaveletTree {
     /// Create a new Wavelet Tree from a sequence of symbols.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any symbol in `data` is >= `sigma`.
     pub fn new(data: &[u32], sigma: u32) -> Self {
+        for (i, &v) in data.iter().enumerate() {
+            assert!(
+                v < sigma,
+                "WaveletTree: symbol {} at index {} >= sigma {}",
+                v,
+                i,
+                sigma
+            );
+        }
         let root = Self::build(data, 0, sigma);
         Self {
             root,
             len: data.len(),
             sigma,
         }
+    }
+
+    /// Return the alphabet size.
+    pub fn sigma(&self) -> u32 {
+        self.sigma
     }
 
     fn build(data: &[u32], min: u32, max: u32) -> WaveletNode {
@@ -137,6 +156,91 @@ impl WaveletTree {
             Some(pos)
         } else {
             None
+        }
+    }
+
+    /// Return the symbol at index `i`, or `None` if out of bounds.
+    pub fn get(&self, i: usize) -> Option<u32> {
+        if i < self.len {
+            Some(self.access(i))
+        } else {
+            None
+        }
+    }
+
+    /// Heap memory usage in bytes.
+    pub fn heap_bytes(&self) -> usize {
+        Self::node_heap_bytes(&self.root)
+    }
+
+    fn node_heap_bytes(node: &WaveletNode) -> usize {
+        match node {
+            WaveletNode::Leaf { .. } => 0,
+            WaveletNode::Internal { bv, left, right } => {
+                bv.heap_bytes()
+                    + std::mem::size_of::<WaveletNode>() * 2 // Box overhead
+                    + Self::node_heap_bytes(left)
+                    + Self::node_heap_bytes(right)
+            }
+        }
+    }
+
+    /// Serialize this wavelet tree to a stable binary encoding.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"SBITWT01");
+        out.extend_from_slice(&(self.len as u64).to_le_bytes());
+        out.extend_from_slice(&self.sigma.to_le_bytes());
+        Self::serialize_node(&self.root, &mut out);
+        out
+    }
+
+    fn serialize_node(node: &WaveletNode, out: &mut Vec<u8>) {
+        match node {
+            WaveletNode::Leaf { symbol } => {
+                out.push(0u8); // tag: leaf
+                out.extend_from_slice(&symbol.to_le_bytes());
+            }
+            WaveletNode::Internal { bv, left, right } => {
+                out.push(1u8); // tag: internal
+                let bv_bytes = bv.to_bytes();
+                out.extend_from_slice(&(bv_bytes.len() as u64).to_le_bytes());
+                out.extend_from_slice(&bv_bytes);
+                Self::serialize_node(left, out);
+                Self::serialize_node(right, out);
+            }
+        }
+    }
+
+    /// Deserialize a wavelet tree from `to_bytes()` output.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let mut r = ByteReader::new(bytes);
+        r.read_magic(b"SBITWT01", "WaveletTree")?;
+        let len = r.read_u64()? as usize;
+        let sigma = r.read_u32()?;
+        let root = Self::deserialize_node(&mut r)?;
+        r.expect_eof("WaveletTree")?;
+        Ok(Self { root, len, sigma })
+    }
+
+    fn deserialize_node(r: &mut ByteReader<'_>) -> Result<WaveletNode> {
+        let tag = r.take(1)?[0];
+        match tag {
+            0 => {
+                let symbol = r.read_u32()?;
+                Ok(WaveletNode::Leaf { symbol })
+            }
+            1 => {
+                let bv_len = r.read_u64()? as usize;
+                let bv_bytes = r.take(bv_len)?;
+                let bv = BitVector::from_bytes(bv_bytes)?;
+                let left = Box::new(Self::deserialize_node(r)?);
+                let right = Box::new(Self::deserialize_node(r)?);
+                Ok(WaveletNode::Internal { bv, left, right })
+            }
+            _ => Err(Error::InvalidEncoding(format!(
+                "WaveletTree: unknown node tag {tag}"
+            ))),
         }
     }
 

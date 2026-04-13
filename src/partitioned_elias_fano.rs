@@ -117,6 +117,16 @@ impl PartitionedEliasFano {
         Ok(base + rel)
     }
 
+    /// Return an iterator over all encoded values.
+    pub fn iter(&self) -> PefIter<'_> {
+        PefIter { pef: self, idx: 0 }
+    }
+
+    /// Heap memory usage in bytes.
+    pub fn heap_bytes(&self) -> usize {
+        self.bases.len() * 4 + self.blocks.iter().map(|b| b.heap_bytes()).sum::<usize>()
+    }
+
     /// Serialize this partitioned structure to a stable binary encoding (little-endian).
     ///
     /// Format (versioned):
@@ -185,6 +195,41 @@ impl PartitionedEliasFano {
             bases,
             blocks,
         })
+    }
+}
+
+/// Iterator over values in a [`PartitionedEliasFano`] structure.
+pub struct PefIter<'a> {
+    pef: &'a PartitionedEliasFano,
+    idx: usize,
+}
+
+impl Iterator for PefIter<'_> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<u32> {
+        if self.idx >= self.pef.n {
+            return None;
+        }
+        let val = self.pef.get(self.idx).unwrap();
+        self.idx += 1;
+        Some(val)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.pef.n - self.idx;
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for PefIter<'_> {}
+
+impl<'a> IntoIterator for &'a PartitionedEliasFano {
+    type Item = u32;
+    type IntoIter = PefIter<'a>;
+
+    fn into_iter(self) -> PefIter<'a> {
+        self.iter()
     }
 }
 
