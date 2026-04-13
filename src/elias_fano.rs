@@ -196,20 +196,35 @@ impl EliasFano {
         if self.n == 0 {
             return None;
         }
-        // Binary search for the first index whose value >= target.
-        let mut lo = 0usize;
-        let mut hi = self.n;
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            // get() only fails on OOB, which can't happen here.
-            if self.get(mid).unwrap() < target {
-                lo = mid + 1;
-            } else {
-                hi = mid;
+
+        // Use select0 on upper bitvector to narrow search to one bucket.
+        // In the upper bitvec, zeros separate buckets by high-bit value.
+        // select0(h) gives the end of bucket h; rank1 there gives the element count.
+        let high = (target >> self.l) as usize;
+
+        let (bucket_start, bucket_end) = self.bucket_range(high);
+
+        if bucket_start < bucket_end {
+            // Binary search within the bucket for first element >= target.
+            let mut lo = bucket_start;
+            let mut hi = bucket_end;
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if self.get(mid).unwrap() < target {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            if lo < bucket_end {
+                return Some(self.get(lo).unwrap());
             }
         }
-        if lo < self.n {
-            Some(self.get(lo).unwrap())
+
+        // Not found in this bucket; successor is the first element in the next non-empty bucket.
+        let next_start = bucket_end;
+        if next_start < self.n {
+            Some(self.get(next_start).unwrap())
         } else {
             None
         }
@@ -231,22 +246,80 @@ impl EliasFano {
         if self.n == 0 {
             return None;
         }
-        // Binary search for the last index whose value <= target.
-        let mut lo = 0usize;
-        let mut hi = self.n;
+
+        let high = (target >> self.l) as usize;
+        let (bucket_start, bucket_end) = self.bucket_range(high);
+
+        if bucket_start < bucket_end {
+            // Binary search within the bucket for last element <= target.
+            let mut lo = bucket_start;
+            let mut hi = bucket_end;
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if self.get(mid).unwrap() <= target {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            if lo > bucket_start {
+                return Some(self.get(lo - 1).unwrap());
+            }
+        }
+
+        // No match in this bucket; predecessor is the last element in the previous non-empty bucket.
+        if bucket_start > 0 {
+            Some(self.get(bucket_start - 1).unwrap())
+        } else {
+            None
+        }
+    }
+
+    /// Return the index range [start, end) of elements in the given upper-bits bucket.
+    fn bucket_range(&self, high: usize) -> (usize, usize) {
+        let start = if high == 0 {
+            0
+        } else {
+            match self.upper_bits.select0(high - 1) {
+                Some(pos) => self.upper_bits.rank1(pos + 1),
+                None => self.n,
+            }
+        };
+        let end = match self.upper_bits.select0(high) {
+            Some(pos) => self.upper_bits.rank1(pos),
+            None => self.n,
+        };
+        (start, end)
+    }
+
+    /// Alias for [`successor`](Self::successor) -- the standard name in IR literature.
+    pub fn next_geq(&self, target: u32) -> Option<u32> {
+        self.successor(target)
+    }
+
+    /// Return the number of encoded values strictly less than `target`.
+    pub fn rank(&self, target: u32) -> usize {
+        if self.n == 0 {
+            return 0;
+        }
+        let high = (target >> self.l) as usize;
+        let (bucket_start, bucket_end) = self.bucket_range(high);
+
+        if bucket_start >= bucket_end {
+            return bucket_start;
+        }
+
+        let mut lo = bucket_start;
+        let mut hi = bucket_end;
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
-            if self.get(mid).unwrap() <= target {
+            if self.get(mid).unwrap() < target {
                 lo = mid + 1;
             } else {
                 hi = mid;
             }
         }
-        if lo > 0 {
-            Some(self.get(lo - 1).unwrap())
-        } else {
-            None
-        }
+        lo
     }
 
     /// Return true if `target` is in the encoded sequence.
