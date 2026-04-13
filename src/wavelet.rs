@@ -110,7 +110,16 @@ impl WaveletTree {
     }
 
     /// Return the symbol at index `i`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `i >= len`. Use [`get`](Self::get) for a non-panicking version.
     pub fn access(&self, mut i: usize) -> u32 {
+        assert!(
+            i < self.len,
+            "WaveletTree::access: index {i} >= len {}",
+            self.len
+        );
         let mut curr = &self.root;
         while let WaveletNode::Internal { bv, left, right } = curr {
             if bv.get(i) {
