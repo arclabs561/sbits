@@ -13,7 +13,7 @@ Python bindings for the [sbits](https://crates.io/crates/sbits) Rust crate.
 ```python
 from sbits import BitVector, EliasFano, WaveletTree
 
-# Bit vector with O(1) rank and select
+# Bit vector with O(1) rank and O(log n) select
 bv = BitVector([True, False, True, True, False, True])
 bv.rank(4)    # 3 -- number of set bits in [0, 4)
 bv.select(2)  # 3 -- position of the 3rd set bit (0-indexed)
@@ -38,13 +38,15 @@ wt.select(3, 0)  # 0 -- position of first 3
 |------|-------------|
 | `BitVector(bits)` | Construct from booleans, supports rank/select/get |
 | `BitVector.rank(i)` | Count set bits in [0, i), O(1) |
-| `BitVector.select(k)` | Position of k-th set bit (0-indexed), O(1) |
+| `BitVector.select(k)` | Position of k-th set bit (0-indexed), O(log n) |
 | `BitVector.get(i)` | Test whether bit i is set |
 | `BitVector.count_ones()` | Total number of set bits |
 | `BitVector.to_numpy()` | Export as numpy boolean array |
 | `EliasFano(values)` | Construct from sorted non-negative integers |
 | `EliasFano.get(i)` | Value at index i, O(1) |
-| `EliasFano.contains(v)` | Membership test |
+| `EliasFano.contains(v)` | Membership test, O(log n) |
+| `EliasFano.successor(v)` | Smallest value >= v, O(log bucket) |
+| `EliasFano.predecessor(v)` | Largest value <= v, O(log bucket) |
 | `EliasFano.to_numpy()` | Export as numpy uint32 array |
 | `WaveletTree(data, sigma)` | Construct from symbol sequence and alphabet size |
 | `WaveletTree.rank(sym, i)` | Count occurrences of sym in [0, i), O(log sigma) |

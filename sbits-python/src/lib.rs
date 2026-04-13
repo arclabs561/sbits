@@ -7,7 +7,7 @@ use pyo3::types::PyType;
 // BitVector
 // ---------------------------------------------------------------------------
 
-/// Succinct bit vector with O(1) rank and select.
+/// Succinct bit vector with O(1) rank and O(log n) select.
 ///
 /// Space: n + o(n) bits.
 ///
@@ -60,14 +60,14 @@ impl BitVector {
         self.inner.rank0(i)
     }
 
-    /// Position of the k-th set bit (0-indexed). O(1) time.
+    /// Position of the k-th set bit (0-indexed). O(log n) time.
     ///
     /// Returns None if k >= count_ones.
     fn select(&self, k: usize) -> Option<usize> {
         self.inner.select1(k)
     }
 
-    /// Position of the k-th unset bit (0-indexed). O(1) time.
+    /// Position of the k-th unset bit (0-indexed). O(log n) time.
     ///
     /// Returns None if k >= count_zeros.
     fn select0(&self, k: usize) -> Option<usize> {
@@ -196,9 +196,12 @@ impl EliasFano {
         };
         for i in 1..vals.len() {
             if vals[i] < vals[i - 1] {
-                return Err(PyValueError::new_err(
-                    format!("values must be sorted: found {} before {} at index {}", vals[i - 1], vals[i], i)
-                ));
+                return Err(PyValueError::new_err(format!(
+                    "values must be sorted: found {} before {} at index {}",
+                    vals[i - 1],
+                    vals[i],
+                    i
+                )));
             }
         }
         let universe = vals.last().map(|&v| v + 1).unwrap_or(0);
@@ -214,21 +217,24 @@ impl EliasFano {
             .map_err(|e| PyIndexError::new_err(e.to_string()))
     }
 
-    /// Return True if the value is present (linear scan).
-    fn contains(&self, value: u32) -> PyResult<bool> {
-        for i in 0..self.inner.len() {
-            let v = self
-                .inner
-                .get(i)
-                .map_err(|e| PyIndexError::new_err(e.to_string()))?;
-            if v == value {
-                return Ok(true);
-            }
-            if v > value {
-                return Ok(false);
-            }
-        }
-        Ok(false)
+    /// Return True if the value is present. O(log n) time.
+    fn contains(&self, value: u32) -> bool {
+        self.inner.contains(value)
+    }
+
+    /// Smallest value >= target, or None.
+    fn successor(&self, target: u32) -> Option<u32> {
+        self.inner.successor(target)
+    }
+
+    /// Largest value <= target, or None.
+    fn predecessor(&self, target: u32) -> Option<u32> {
+        self.inner.predecessor(target)
+    }
+
+    /// Alias for successor (standard IR name).
+    fn next_geq(&self, target: u32) -> Option<u32> {
+        self.inner.next_geq(target)
     }
 
     /// Export all values as a numpy uint32 array.
@@ -266,7 +272,7 @@ impl EliasFano {
         self.inner.len()
     }
 
-    fn __contains__(&self, value: u32) -> PyResult<bool> {
+    fn __contains__(&self, value: u32) -> bool {
         self.contains(value)
     }
 
@@ -432,6 +438,19 @@ impl WaveletTree {
         self.inner.access(i)
     }
 
+    /// Serialize to bytes for persistence or pickle support.
+    fn to_bytes(&self) -> Vec<u8> {
+        self.inner.to_bytes()
+    }
+
+    /// Deserialize from bytes produced by ``to_bytes()``.
+    #[classmethod]
+    fn from_bytes(_cls: &Bound<'_, PyType>, data: &[u8]) -> PyResult<Self> {
+        let inner = sbits_core::WaveletTree::from_bytes(data)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(Self { inner })
+    }
+
     fn __len__(&self) -> usize {
         self.inner.len()
     }
@@ -456,7 +475,7 @@ impl WaveletTree {
 
 #[pymodule]
 fn sbits(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add("__version__", "0.1.1")?;
+    m.add("__version__", "0.1.3")?;
     m.add_class::<BitVector>()?;
     m.add_class::<EliasFano>()?;
     m.add_class::<PartitionedEliasFano>()?;
