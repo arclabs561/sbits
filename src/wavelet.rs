@@ -9,7 +9,7 @@
 //! Queries `access`, `rank`, `select` take `O(log(sigma))` time.
 
 use crate::bitvec::BitVector;
-use crate::error::{ByteReader, Error, Result};
+use crate::error::{ByteReader, Result};
 
 /// Wavelet Matrix over an integer alphabet.
 ///

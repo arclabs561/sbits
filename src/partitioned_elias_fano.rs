@@ -19,10 +19,10 @@ use crate::error::{Error, Result};
 /// Partitioned Elias–Fano encoding.
 #[derive(Debug, Clone)]
 pub struct PartitionedEliasFano {
-    universe_size: u32,
+    universe_size: u64,
     block_size: usize,
     n: usize,
-    bases: Vec<u32>,
+    bases: Vec<u64>,
     blocks: Vec<EliasFano>,
 }
 
@@ -32,7 +32,7 @@ impl PartitionedEliasFano {
     /// `block_size` is the maximum number of items per block (must be >= 1; values 64–256 are
     /// typical engineering choices).
     #[must_use]
-    pub fn new(values: &[u32], universe_size: u32, block_size: usize) -> Self {
+    pub fn new(values: &[u64], universe_size: u64, block_size: usize) -> Self {
         let n = values.len();
         let block_size = block_size.max(1);
         if n == 0 {
@@ -53,7 +53,7 @@ impl PartitionedEliasFano {
             let base = values[i];
             let last = values[j - 1];
             let local_u = (last - base).saturating_add(1);
-            let rel: Vec<u32> = values[i..j].iter().map(|&v| v - base).collect();
+            let rel: Vec<u64> = values[i..j].iter().map(|&v| v - base).collect();
             bases.push(base);
             blocks.push(EliasFano::new(&rel, local_u));
             i = j;
@@ -70,7 +70,7 @@ impl PartitionedEliasFano {
 
     /// Return the universe size used to build this structure.
     #[must_use]
-    pub fn universe_size(&self) -> u32 {
+    pub fn universe_size(&self) -> u64 {
         self.universe_size
     }
 
@@ -99,7 +99,7 @@ impl PartitionedEliasFano {
     }
 
     /// Return the value at index `i`.
-    pub fn get(&self, i: usize) -> Result<u32> {
+    pub fn get(&self, i: usize) -> Result<u64> {
         if i >= self.n {
             return Err(Error::IndexOutOfBounds(i));
         }
@@ -129,22 +129,22 @@ impl PartitionedEliasFano {
 
     /// Heap memory usage in bytes.
     pub fn heap_bytes(&self) -> usize {
-        self.bases.len() * 4 + self.blocks.iter().map(|b| b.heap_bytes()).sum::<usize>()
+        self.bases.len() * 8 + self.blocks.iter().map(|b| b.heap_bytes()).sum::<usize>()
     }
 
     /// Serialize this partitioned structure to a stable binary encoding (little-endian).
     ///
     /// Format (versioned):
-    /// - magic: 8 bytes (`SBITPEF1`)
-    /// - universe_size: u32
+    /// - magic: 8 bytes (`SBITPEF2`)
+    /// - universe_size: u64
     /// - block_size: u32
     /// - n: u64
     /// - num_blocks: u64
-    /// - bases: `num_blocks` u32
+    /// - bases: `num_blocks` u64
     /// - blocks: for each block: len_bytes u64, then `len_bytes` bytes (EliasFano::to_bytes)
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"SBITPEF1");
+        out.extend_from_slice(b"SBITPEF2");
         out.extend_from_slice(&self.universe_size.to_le_bytes());
         out.extend_from_slice(&(self.block_size as u32).to_le_bytes());
         out.extend_from_slice(&(self.n as u64).to_le_bytes());
@@ -165,12 +165,12 @@ impl PartitionedEliasFano {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         use crate::error::ByteReader;
         let mut r = ByteReader::new(bytes);
-        r.read_magic(b"SBITPEF1", "PartitionedEliasFano")?;
-        let universe_size = r.read_u32()?;
+        r.read_magic(b"SBITPEF2", "PartitionedEliasFano")?;
+        let universe_size = r.read_u64()?;
         let block_size = r.read_u32()? as usize;
         let n = r.read_u64()? as usize;
         let num_blocks = r.read_u64()? as usize;
-        let bases = r.read_u32_vec(num_blocks)?;
+        let bases = r.read_u64_vec(num_blocks)?;
 
         let mut blocks = Vec::with_capacity(num_blocks);
         for _ in 0..num_blocks {
@@ -214,9 +214,9 @@ pub struct PefIter<'a> {
 }
 
 impl Iterator for PefIter<'_> {
-    type Item = u32;
+    type Item = u64;
 
-    fn next(&mut self) -> Option<u32> {
+    fn next(&mut self) -> Option<u64> {
         if self.remaining == 0 {
             return None;
         }
@@ -247,7 +247,7 @@ impl Iterator for PefIter<'_> {
 impl ExactSizeIterator for PefIter<'_> {}
 
 impl<'a> IntoIterator for &'a PartitionedEliasFano {
-    type Item = u32;
+    type Item = u64;
     type IntoIter = PefIter<'a>;
 
     fn into_iter(self) -> PefIter<'a> {
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn partitioned_roundtrip_basic() {
-        let values = vec![10, 20, 30, 31, 32, 100, 1000];
+        let values = vec![10u64, 20, 30, 31, 32, 100, 1000];
         let pef = PartitionedEliasFano::new(&values, 2000, 3);
         assert_eq!(pef.len(), values.len());
         for (i, &v) in values.iter().enumerate() {
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn partitioned_single_element() {
-        let pef = PartitionedEliasFano::new(&[42], 100, 64);
+        let pef = PartitionedEliasFano::new(&[42u64], 100, 64);
         assert_eq!(pef.len(), 1);
         assert_eq!(pef.get(0).unwrap(), 42);
         let bytes = pef.to_bytes();
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn partitioned_empty() {
-        let pef = PartitionedEliasFano::new(&[], 100, 64);
+        let pef = PartitionedEliasFano::new(&[], 100u64, 64);
         assert!(pef.is_empty());
         assert!(pef.get(0).is_err());
     }
@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn partitioned_block_boundary() {
         // block_size=3, 6 elements = exactly 2 full blocks.
-        let values = vec![0, 1, 2, 10, 11, 12];
+        let values = vec![0u64, 1, 2, 10, 11, 12];
         let pef = PartitionedEliasFano::new(&values, 20, 3);
         assert_eq!(pef.num_blocks(), 2);
         for (i, &v) in values.iter().enumerate() {
@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn partitioned_block_size_larger_than_n() {
-        let values = vec![5, 10, 15];
+        let values = vec![5u64, 10, 15];
         let pef = PartitionedEliasFano::new(&values, 20, 100);
         assert_eq!(pef.num_blocks(), 1);
         for (i, &v) in values.iter().enumerate() {
@@ -316,12 +316,12 @@ mod tests {
 
     #[test]
     fn partitioned_rejects_corrupted_n() {
-        let values = vec![10, 20, 30];
+        let values = vec![10u64, 20, 30];
         let pef = PartitionedEliasFano::new(&values, 100, 2);
         let mut bytes = pef.to_bytes();
-        // Corrupt the `n` field (offset 16..24) to a wrong value.
+        // Corrupt the `n` field (offset 20..28) to a wrong value.
         let bad_n: u64 = 999;
-        bytes[16..24].copy_from_slice(&bad_n.to_le_bytes());
+        bytes[20..28].copy_from_slice(&bad_n.to_le_bytes());
         assert!(PartitionedEliasFano::from_bytes(&bytes).is_err());
     }
 }

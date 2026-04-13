@@ -69,7 +69,7 @@ use sbits::wavelet::WaveletTree;
 proptest! {
     #[test]
     fn test_elias_fano_property(
-        mut values in prop::collection::vec(0..10000u32, 1..100),
+        mut values in prop::collection::vec(0..10000u64, 1..100),
     ) {
         values.sort();
         values.dedup();
@@ -87,7 +87,7 @@ proptest! {
 
     #[test]
     fn test_elias_fano_serialization_roundtrip(
-        mut values in prop::collection::vec(0..10000u32, 1..50),
+        mut values in prop::collection::vec(0..10000u64, 1..50),
     ) {
         values.sort();
         values.dedup();
@@ -106,7 +106,7 @@ proptest! {
 
     #[test]
     fn test_partitioned_elias_fano_property(
-        mut values in prop::collection::vec(0..10000u32, 1..100),
+        mut values in prop::collection::vec(0..10000u64, 1..100),
         block_size in 1usize..32,
     ) {
         values.sort();
@@ -125,7 +125,7 @@ proptest! {
 
     #[test]
     fn test_partitioned_elias_fano_serialization_roundtrip(
-        mut values in prop::collection::vec(0..10000u32, 1..50),
+        mut values in prop::collection::vec(0..10000u64, 1..50),
         block_size in 1usize..32,
     ) {
         values.sort();
@@ -245,7 +245,7 @@ proptest! {
 
     #[test]
     fn test_elias_fano_predecessor_successor(
-        mut values in prop::collection::vec(0..10000u32, 1..100),
+        mut values in prop::collection::vec(0..10000u64, 1..100),
     ) {
         values.sort();
         values.dedup();
@@ -274,19 +274,19 @@ proptest! {
         prop_assert_eq!(ef.predecessor(last + 1), Some(last));
 
         // Iterator produces all values in order
-        let from_iter: Vec<u32> = ef.iter().collect();
+        let from_iter: Vec<u64> = ef.iter().collect();
         prop_assert_eq!(&from_iter, &values);
 
         // Contains
         for &v in &values {
             prop_assert!(ef.contains(v));
         }
-        prop_assert!(!ef.contains(universe_size - 1)); // likely not in values
+        prop_assert!(!ef.contains(universe_size - 1));
     }
 
     #[test]
     fn test_partitioned_elias_fano_iter(
-        mut values in prop::collection::vec(0..10000u32, 1..100),
+        mut values in prop::collection::vec(0..10000u64, 1..100),
         block_size in 1usize..32,
     ) {
         values.sort();
@@ -296,7 +296,7 @@ proptest! {
         let universe_size = values.last().copied().unwrap() + 100;
         let pef = PartitionedEliasFano::new(&values, universe_size, block_size);
 
-        let from_iter: Vec<u32> = pef.iter().collect();
+        let from_iter: Vec<u64> = pef.iter().collect();
         prop_assert_eq!(&from_iter, &values);
         prop_assert_eq!(pef.iter().len(), values.len());
     }

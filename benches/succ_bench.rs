@@ -63,8 +63,8 @@ fn bench_elias_fano(c: &mut Criterion) {
     let mut group = c.benchmark_group("elias_fano");
 
     // 10K sorted values in [0, 1M)
-    let values: Vec<u32> = (0..10_000).map(|i| i * 100).collect();
-    let ef = EliasFano::new(&values, 1_000_001);
+    let values: Vec<u64> = (0..10_000).map(|i| i as u64 * 100).collect();
+    let ef = EliasFano::new(&values, 1_000_001u64);
 
     group.bench_function("get_10K", |b| {
         b.iter(|| {
@@ -77,7 +77,7 @@ fn bench_elias_fano(c: &mut Criterion) {
     group.bench_function("successor_10K", |b| {
         b.iter(|| {
             for target in (0..1_000_000).step_by(400) {
-                black_box(ef.successor(target as u32));
+                black_box(ef.successor(target));
             }
         })
     });
@@ -85,7 +85,7 @@ fn bench_elias_fano(c: &mut Criterion) {
     group.bench_function("predecessor_10K", |b| {
         b.iter(|| {
             for target in (0..1_000_000).step_by(400) {
-                black_box(ef.predecessor(target as u32));
+                black_box(ef.predecessor(target));
             }
         })
     });
@@ -109,8 +109,8 @@ fn bench_elias_fano(c: &mut Criterion) {
 fn bench_partitioned_elias_fano(c: &mut Criterion) {
     let mut group = c.benchmark_group("partitioned_ef");
 
-    let values: Vec<u32> = (0..10_000).map(|i| i * 100).collect();
-    let pef = PartitionedEliasFano::new(&values, 1_000_001, 128);
+    let values: Vec<u64> = (0..10_000).map(|i| i as u64 * 100).collect();
+    let pef = PartitionedEliasFano::new(&values, 1_000_001u64, 128);
 
     group.bench_function("get_10K", |b| {
         b.iter(|| {
@@ -132,7 +132,7 @@ fn bench_wavelet_tree(c: &mut Criterion) {
     let mut group = c.benchmark_group("wavelet_tree");
 
     // 10K symbols over alphabet of size 256
-    let data: Vec<u32> = (0..10_000).map(|i| (i * 7 + 13) % 256).collect();
+    let data: Vec<u32> = (0..10_000).map(|i| ((i * 7 + 13) % 256) as u32).collect();
     let wt = WaveletTree::new(&data, 256);
 
     group.bench_function("access_10K", |b| {
@@ -250,12 +250,12 @@ fn bench_ef_scale(c: &mut Criterion) {
     let mut group = c.benchmark_group("ef_scale");
 
     // 100K elements
-    let values_100k: Vec<u32> = (0..100_000).map(|i| i * 40).collect();
-    let ef_100k = EliasFano::new(&values_100k, 4_000_001);
+    let values_100k: Vec<u64> = (0..100_000).map(|i| i as u64 * 40).collect();
+    let ef_100k = EliasFano::new(&values_100k, 4_000_001u64);
 
     group.bench_function("successor_100K", |b| {
         b.iter(|| {
-            for target in (0..4_000_000u32).step_by(4000) {
+            for target in (0..4_000_000u64).step_by(4000) {
                 black_box(ef_100k.successor(target));
             }
         })
@@ -270,17 +270,17 @@ fn bench_ef_scale(c: &mut Criterion) {
     // Clustered data (simulates posting list)
     let mut clustered = Vec::new();
     for cluster in 0..100 {
-        let base = cluster * 100_000;
+        let base: u64 = cluster * 100_000;
         for j in 0..1000 {
             clustered.push(base + j * 3);
         }
     }
-    let ef_clustered = EliasFano::new(&clustered, 10_000_001);
-    let pef_clustered = PartitionedEliasFano::new(&clustered, 10_000_001, 128);
+    let ef_clustered = EliasFano::new(&clustered, 10_000_001u64);
+    let pef_clustered = PartitionedEliasFano::new(&clustered, 10_000_001u64, 128);
 
     group.bench_function("ef_successor_clustered_100K", |b| {
         b.iter(|| {
-            for target in (0..10_000_000u32).step_by(10_000) {
+            for target in (0..10_000_000u64).step_by(10_000) {
                 black_box(ef_clustered.successor(target));
             }
         })

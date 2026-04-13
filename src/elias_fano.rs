@@ -17,7 +17,7 @@ use crate::error::{Error, Result};
 /// Elias-Fano encoding structure.
 #[derive(Debug, Clone)]
 pub struct EliasFano {
-    universe_size: u32,
+    universe_size: u64,
     upper_bits: BitVector,
     lower_bits: Vec<u64>,
     l: usize,
@@ -30,7 +30,7 @@ impl EliasFano {
     /// ```
     /// use sbits::EliasFano;
     ///
-    /// let values = vec![10, 20, 30, 100, 1000];
+    /// let values = vec![10u64, 20, 30, 100, 1000];
     /// let ef = EliasFano::new(&values, 2000);
     /// assert_eq!(ef.len(), 5);
     /// assert_eq!(ef.get(0).unwrap(), 10);
@@ -40,7 +40,7 @@ impl EliasFano {
     ///
     /// Panics if `values` is not sorted in non-decreasing order, or if any value
     /// is >= `universe_size`.
-    pub fn new(values: &[u32], universe_size: u32) -> Self {
+    pub fn new(values: &[u64], universe_size: u64) -> Self {
         // Validate sorted and within universe.
         for i in 0..values.len() {
             assert!(
@@ -73,9 +73,9 @@ impl EliasFano {
         }
 
         // L = floor(log2(U/n))
-        let ratio = universe_size / n as u32;
+        let ratio = universe_size / n as u64;
         let l = if ratio > 0 {
-            (31 - ratio.leading_zeros()) as usize
+            (63 - ratio.leading_zeros()) as usize
         } else {
             0
         };
@@ -86,7 +86,7 @@ impl EliasFano {
         let mut bit_offset = 0;
 
         for &v in values {
-            let low = (v & ((1 << l) - 1)) as u64;
+            let low = v & ((1u64 << l) - 1);
             if bit_offset + l <= 64 {
                 current_word |= low << bit_offset;
                 bit_offset += l;
@@ -129,7 +129,7 @@ impl EliasFano {
     }
 
     /// Return the universe size used to build this structure.
-    pub fn universe_size(&self) -> u32 {
+    pub fn universe_size(&self) -> u64 {
         self.universe_size
     }
 
@@ -144,7 +144,7 @@ impl EliasFano {
     }
 
     /// Return the value at index `i`.
-    pub fn get(&self, i: usize) -> Result<u32> {
+    pub fn get(&self, i: usize) -> Result<u64> {
         if i >= self.n {
             return Err(Error::IndexOutOfBounds(i));
         }
@@ -154,13 +154,13 @@ impl EliasFano {
             .upper_bits
             .select1(i)
             .ok_or(Error::InvalidSelection(i))?;
-        let high = (pos - i) as u32;
+        let high = (pos - i) as u64;
 
         // 2. Get low bits from lower_bits.
         //
         // Important edge case: when `l == 0`, there is no low part and `lower_bits` is empty.
         // (This occurs for small universes or high density where U/n <= 1.)
-        let low: u32 = if self.l == 0 {
+        let low: u64 = if self.l == 0 {
             0
         } else {
             let start_bit = i * self.l;
@@ -174,7 +174,7 @@ impl EliasFano {
                     << (self.l - bits_from_next);
             }
             low &= (1 << self.l) - 1;
-            low as u32
+            low
         };
 
         Ok((high << self.l) | low)
@@ -187,12 +187,12 @@ impl EliasFano {
     /// ```
     /// use sbits::EliasFano;
     ///
-    /// let ef = EliasFano::new(&[10, 20, 30, 100, 1000], 2000);
+    /// let ef = EliasFano::new(&[10u64, 20, 30, 100, 1000], 2000);
     /// assert_eq!(ef.successor(15), Some(20));
     /// assert_eq!(ef.successor(20), Some(20));
     /// assert_eq!(ef.successor(1001), None);
     /// ```
-    pub fn successor(&self, target: u32) -> Option<u32> {
+    pub fn successor(&self, target: u64) -> Option<u64> {
         if self.n == 0 {
             return None;
         }
@@ -237,12 +237,12 @@ impl EliasFano {
     /// ```
     /// use sbits::EliasFano;
     ///
-    /// let ef = EliasFano::new(&[10, 20, 30, 100, 1000], 2000);
+    /// let ef = EliasFano::new(&[10u64, 20, 30, 100, 1000], 2000);
     /// assert_eq!(ef.predecessor(25), Some(20));
     /// assert_eq!(ef.predecessor(20), Some(20));
     /// assert_eq!(ef.predecessor(9), None);
     /// ```
-    pub fn predecessor(&self, target: u32) -> Option<u32> {
+    pub fn predecessor(&self, target: u64) -> Option<u64> {
         if self.n == 0 {
             return None;
         }
@@ -293,12 +293,12 @@ impl EliasFano {
     }
 
     /// Alias for [`successor`](Self::successor) -- the standard name in IR literature.
-    pub fn next_geq(&self, target: u32) -> Option<u32> {
+    pub fn next_geq(&self, target: u64) -> Option<u64> {
         self.successor(target)
     }
 
     /// Return the number of encoded values strictly less than `target`.
-    pub fn rank(&self, target: u32) -> usize {
+    pub fn rank(&self, target: u64) -> usize {
         if self.n == 0 {
             return 0;
         }
@@ -325,7 +325,7 @@ impl EliasFano {
     /// Return true if `target` is in the encoded sequence.
     ///
     /// Uses `successor` internally: O(log n).
-    pub fn contains(&self, target: u32) -> bool {
+    pub fn contains(&self, target: u64) -> bool {
         self.successor(target) == Some(target)
     }
 
@@ -342,16 +342,15 @@ impl EliasFano {
     /// Serialize this Elias–Fano structure to a stable binary encoding (little-endian).
     ///
     /// Format (versioned):
-    /// - magic: 8 bytes (`SBITEF01`)
-    /// - universe_size: u32
+    /// - magic: 8 bytes (`SBITEF02`)
+    /// - universe_size: u64
     /// - l: u32
     /// - n: u64
     /// - lower_len: u64, then `lower_len` u64 words
     /// - upper_bits: byte_len u64, then `byte_len` bytes (BitVector::to_bytes)
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        out.extend_from_slice(b"SBITEF01");
-
+        out.extend_from_slice(b"SBITEF02");
         out.extend_from_slice(&self.universe_size.to_le_bytes());
         out.extend_from_slice(&(self.l as u32).to_le_bytes());
         out.extend_from_slice(&(self.n as u64).to_le_bytes());
@@ -371,12 +370,12 @@ impl EliasFano {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         use crate::error::ByteReader;
         let mut r = ByteReader::new(bytes);
-        r.read_magic(b"SBITEF01", "EliasFano")?;
-        let universe_size = r.read_u32()?;
+        r.read_magic(b"SBITEF02", "EliasFano")?;
+        let universe_size = r.read_u64()?;
         let l = r.read_u32()? as usize;
-        if l > 31 {
+        if l > 63 {
             return Err(Error::InvalidEncoding(format!(
-                "EliasFano l={l} exceeds maximum (31) for u32 values"
+                "EliasFano l={l} exceeds maximum (63) for u64 values"
             )));
         }
         let n = r.read_u64()? as usize;
@@ -404,9 +403,9 @@ pub struct EliasFanoIter<'a> {
 }
 
 impl Iterator for EliasFanoIter<'_> {
-    type Item = u32;
+    type Item = u64;
 
-    fn next(&mut self) -> Option<u32> {
+    fn next(&mut self) -> Option<u64> {
         if self.idx >= self.ef.n {
             return None;
         }
@@ -424,7 +423,7 @@ impl Iterator for EliasFanoIter<'_> {
 impl ExactSizeIterator for EliasFanoIter<'_> {}
 
 impl<'a> IntoIterator for &'a EliasFano {
-    type Item = u32;
+    type Item = u64;
     type IntoIter = EliasFanoIter<'a>;
 
     fn into_iter(self) -> EliasFanoIter<'a> {
@@ -438,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_elias_fano_basic() {
-        let values = vec![10, 20, 30, 100, 1000];
+        let values = vec![10u64, 20, 30, 100, 1000];
         let ef = EliasFano::new(&values, 2000);
 
         assert_eq!(ef.len(), 5);
@@ -452,7 +451,7 @@ mod tests {
     #[test]
     fn test_elias_fano_l_equals_zero() {
         // l=0 when universe_size / n <= 1 (high density).
-        let values = vec![0, 1, 2, 3];
+        let values = vec![0u64, 1, 2, 3];
         let ef = EliasFano::new(&values, 4);
         assert_eq!(ef.len(), 4);
         for (i, &v) in values.iter().enumerate() {
@@ -462,7 +461,7 @@ mod tests {
 
     #[test]
     fn test_elias_fano_serialization_roundtrip() {
-        let values = vec![10, 20, 30, 100, 1000];
+        let values = vec![10u64, 20, 30, 100, 1000];
         let ef = EliasFano::new(&values, 2000);
         let bytes = ef.to_bytes();
         let ef2 = EliasFano::from_bytes(&bytes).unwrap();
@@ -474,7 +473,7 @@ mod tests {
 
     #[test]
     fn test_elias_fano_l0_serialization_roundtrip() {
-        let values = vec![0, 1, 2, 3];
+        let values = vec![0u64, 1, 2, 3];
         let ef = EliasFano::new(&values, 4);
         let bytes = ef.to_bytes();
         let ef2 = EliasFano::from_bytes(&bytes).unwrap();
@@ -485,13 +484,13 @@ mod tests {
 
     #[test]
     fn test_elias_fano_rejects_bad_l() {
-        let ef = EliasFano::new(&[10], 100);
+        let ef = EliasFano::new(&[10u64], 100);
         let mut bytes = ef.to_bytes();
-        // Corrupt the `l` field (offset 12..16) to 32.
-        bytes[12] = 32;
-        bytes[13] = 0;
-        bytes[14] = 0;
-        bytes[15] = 0;
+        // Corrupt the `l` field (offset 16..20) to 64.
+        bytes[16] = 64;
+        bytes[17] = 0;
+        bytes[18] = 0;
+        bytes[19] = 0;
         assert!(EliasFano::from_bytes(&bytes).is_err());
     }
 
