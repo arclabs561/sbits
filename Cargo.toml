@@ -10,11 +10,17 @@ homepage = "https://github.com/arclabs561/sbits"
 documentation = "https://docs.rs/sbits"
 readme = "README.md"
 keywords = ["succinct", "bitvec", "rank-select"]
-categories = ["data-structures", "algorithms"]
+categories = ["data-structures", "algorithms", "no-std"]
 
 [workspace]
 
+[features]
+default = ["std"]
+std = []
+serde = ["dep:serde"]
+
 [dependencies]
+serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
 proptest = "1.5"

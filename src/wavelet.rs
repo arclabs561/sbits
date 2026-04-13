@@ -10,6 +10,8 @@
 
 use crate::bitvec::BitVector;
 use crate::error::{ByteReader, Result};
+use alloc::vec;
+use alloc::vec::Vec;
 
 /// Wavelet Matrix over an integer alphabet.
 ///
@@ -18,6 +20,7 @@ use crate::error::{ByteReader, Result};
 /// elements. This flat layout avoids the heap-allocated tree nodes of a
 /// traditional wavelet tree.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WaveletTree {
     /// One bitvector per bit-level, from MSB (index 0) to LSB.
     levels: Vec<BitVector>,
@@ -188,7 +191,7 @@ impl WaveletTree {
     /// Heap memory usage in bytes.
     pub fn heap_bytes(&self) -> usize {
         self.levels.iter().map(|bv| bv.heap_bytes()).sum::<usize>()
-            + self.zeros.len() * std::mem::size_of::<usize>()
+            + self.zeros.len() * core::mem::size_of::<usize>()
     }
 
     /// Serialize this wavelet matrix to a stable binary encoding.
@@ -260,6 +263,7 @@ impl WaveletTree {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn test_wavelet_tree_basic() {

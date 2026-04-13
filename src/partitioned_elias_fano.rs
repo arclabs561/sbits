@@ -15,9 +15,12 @@
 
 use crate::elias_fano::EliasFano;
 use crate::error::{Error, Result};
+use alloc::vec::Vec;
+use alloc::{format, string::ToString};
 
 /// Partitioned Elias–Fano encoding.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PartitionedEliasFano {
     universe_size: u64,
     block_size: usize,
@@ -258,6 +261,7 @@ impl<'a> IntoIterator for &'a PartitionedEliasFano {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn partitioned_roundtrip_basic() {

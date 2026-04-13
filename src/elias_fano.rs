@@ -13,9 +13,13 @@
 
 use crate::bitvec::BitVector;
 use crate::error::{Error, Result};
+use alloc::format;
+use alloc::vec;
+use alloc::vec::Vec;
 
 /// Elias-Fano encoding structure.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EliasFano {
     universe_size: u64,
     upper_bits: BitVector,
@@ -434,6 +438,7 @@ impl<'a> IntoIterator for &'a EliasFano {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn test_elias_fano_basic() {

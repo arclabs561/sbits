@@ -1,7 +1,12 @@
 //! Error types and deserialization utilities for succinct data structures.
 
+use alloc::string::String;
+use alloc::vec::Vec;
+use alloc::{format, string::ToString};
+
 /// Error variants for succinct data structure operations.
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Error {
     /// An index was provided that is out of the structure's bounds.
     IndexOutOfBounds(usize),
@@ -13,8 +18,8 @@ pub enum Error {
     InvalidEncoding(String),
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Error::IndexOutOfBounds(i) => write!(f, "index out of bounds: {i}"),
             Error::InvalidSelection(k) => write!(f, "invalid selection: rank {k} not found"),
@@ -23,10 +28,11 @@ impl std::fmt::Display for Error {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
 /// A specialized Result type for succinct operations.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
 
 /// Cursor for reading little-endian binary encodings.
 pub(crate) struct ByteReader<'a> {

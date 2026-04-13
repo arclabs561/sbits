@@ -71,8 +71,14 @@
 //! - Munro, J. I., & Raman, V. (1996). "Selection and counting on the fly."
 //! - Grossi, R., et al. (2003). "High-order entropy-compressed text indexes."
 
+#![no_std]
 #![warn(missing_docs)]
 #![warn(clippy::all)]
+
+extern crate alloc;
+
+#[cfg(feature = "std")]
+extern crate std;
 
 pub mod bitvec;
 pub mod elias_fano;

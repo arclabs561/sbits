@@ -13,8 +13,13 @@
 //! This ensures that once the block header is in cache, all data needed for
 //! rank/select within that block is also available.
 
+use alloc::vec;
+use alloc::vec::Vec;
+use alloc::{format, string::ToString};
+
 /// A cache-oblivious succinct bit vector.
 #[derive(Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BitVector {
     /// Interleaved data: [abs_rank, rel_ranks, data0, ..., data7, ...]
     storage: Vec<u64>,
@@ -25,8 +30,8 @@ pub struct BitVector {
     len: usize,
 }
 
-impl std::fmt::Debug for BitVector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for BitVector {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("BitVector")
             .field("len", &self.len)
             .field("ones", &self.rank1(self.len))
@@ -535,6 +540,7 @@ impl ExactSizeIterator for ZerosIter<'_> {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn test_bitvector_rank_basic() {
