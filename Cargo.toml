@@ -1,6 +1,6 @@
 [package]
 name = "sbits"
-version = "0.1.3"
+version = "0.2.0"
 authors = ["Arc <attobop@gmail.com>"]
 edition = "2021"
 description = "Succinct data structures: near-optimal space with efficient queries."
