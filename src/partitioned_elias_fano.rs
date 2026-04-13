@@ -119,7 +119,12 @@ impl PartitionedEliasFano {
 
     /// Return an iterator over all encoded values.
     pub fn iter(&self) -> PefIter<'_> {
-        PefIter { pef: self, idx: 0 }
+        PefIter {
+            pef: self,
+            block_idx: 0,
+            elem_in_block: 0,
+            remaining: self.n,
+        }
     }
 
     /// Heap memory usage in bytes.
@@ -199,26 +204,43 @@ impl PartitionedEliasFano {
 }
 
 /// Iterator over values in a [`PartitionedEliasFano`] structure.
+///
+/// Iterates block-by-block to avoid per-element division/modulo overhead.
 pub struct PefIter<'a> {
     pef: &'a PartitionedEliasFano,
-    idx: usize,
+    block_idx: usize,
+    elem_in_block: usize,
+    remaining: usize,
 }
 
 impl Iterator for PefIter<'_> {
     type Item = u32;
 
     fn next(&mut self) -> Option<u32> {
-        if self.idx >= self.pef.n {
+        if self.remaining == 0 {
             return None;
         }
-        let val = self.pef.get(self.idx).unwrap();
-        self.idx += 1;
-        Some(val)
+        // Advance to next block if current is exhausted.
+        while self.block_idx < self.pef.blocks.len()
+            && self.elem_in_block >= self.pef.blocks[self.block_idx].len()
+        {
+            self.block_idx += 1;
+            self.elem_in_block = 0;
+        }
+        if self.block_idx >= self.pef.blocks.len() {
+            return None;
+        }
+        let base = self.pef.bases[self.block_idx];
+        let rel = self.pef.blocks[self.block_idx]
+            .get(self.elem_in_block)
+            .unwrap();
+        self.elem_in_block += 1;
+        self.remaining -= 1;
+        Some(base + rel)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.pef.n - self.idx;
-        (remaining, Some(remaining))
+        (self.remaining, Some(self.remaining))
     }
 }
 
