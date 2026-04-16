@@ -474,38 +474,26 @@ impl BitVector {
             }
         }
 
-        // Broadword select algorithm (Vigna, "Broadword Implementation of Rank/Select Queries").
-        // O(1) arithmetic operations, no branches dependent on data.
-        // Reference: https://vigna.di.unimi.it/ftp/papers/Broadword.pdf
-        const L8: u64 = 0x0101_0101_0101_0101u64; // 1 in every byte
-        const H8: u64 = 0x8080_8080_8080_8080u64; // high bit of every byte
-
-        // Step 1: compute byte-level cumulative popcount using broadword.
-        // s[i] = number of set bits in bytes 0..=i of `word`.
-        let mut s = word.wrapping_sub((word >> 1) & 0x5555_5555_5555_5555u64);
-        s = (s & 0x3333_3333_3333_3333u64) + ((s >> 2) & 0x3333_3333_3333_3333u64);
-        s = s.wrapping_add(s >> 4) & 0x0F0F_0F0F_0F0F_0F0Fu64;
-        // Now s has per-byte popcounts. Compute prefix sums across bytes via multiply.
-        // After multiply by L8: byte i of result = sum of bytes 0..=i of s.
-        let byte_sums = s.wrapping_mul(L8);
-
-        // Find which byte contains the k-th bit using ULEQ comparison.
-        // k_step = k replicated in each byte (k < 64, so this fits in 7 bits).
-        let k_step8 = (k as u64).wrapping_mul(L8);
-        // leq_places[i] = 0x80 if byte_sums[i] <= k_step8[i], else 0.
-        // We want the first byte where cumulative count > k, i.e., where NOT leq.
-        let geq_step8 = ((k_step8 | H8).wrapping_sub(byte_sums & !H8)) & H8;
-        // Count bytes where cumulative count <= k: that's the byte index to search within.
-        let byte_idx = (geq_step8.count_ones() as usize) * 8;
-
-        // Within the identified byte, strip `remaining` set bits.
-        let remaining = k - (byte_sums >> byte_idx).wrapping_sub(1) as u8 as usize;
-        let byte_word = (word >> byte_idx) as u8 as u64;
-        let mut w = byte_word;
-        for _ in 0..remaining {
+        // Decompose into bytes: find which byte contains the k-th set bit,
+        // then strip within that byte. Max 7 iterations instead of up to 63.
+        let mut remaining = k + 1; // 1-indexed: find the remaining-th set bit
+        let mut byte_base = 0usize;
+        let mut w = word;
+        // Process 8 bytes: isolate each byte's popcount and check if target is within.
+        for _ in 0..7 {
+            let byte_pop = (w & 0xFF).count_ones() as usize;
+            if byte_pop >= remaining {
+                break;
+            }
+            remaining -= byte_pop;
+            byte_base += 8;
+            w >>= 8;
+        }
+        // Strip (remaining-1) set bits from the current byte and find trailing zeros.
+        for _ in 0..remaining - 1 {
             w &= w.wrapping_sub(1);
         }
-        byte_idx + w.trailing_zeros() as usize
+        byte_base + w.trailing_zeros() as usize
     }
 
     /// Return an iterator over the positions of all set bits.
