@@ -17,6 +17,27 @@ use alloc::vec;
 use alloc::vec::Vec;
 use alloc::{format, string::ToString};
 
+/// `SELECT_IN_BYTE[byte][k]` gives the bit position (0-indexed) of the k-th set bit in `byte`.
+/// When the byte has fewer than k+1 set bits, the entry is 0xFF (sentinel, never reached in
+/// correct usage because `select_in_word` only indexes bytes that contain the target bit).
+const SELECT_IN_BYTE: [[u8; 8]; 256] = {
+    let mut table = [[0xFFu8; 8]; 256];
+    let mut byte = 0usize;
+    while byte < 256 {
+        let mut bit_idx = 0usize; // which occurrence we are filling
+        let mut b = 0usize;
+        while b < 8 {
+            if (byte >> b) & 1 == 1 {
+                table[byte][bit_idx] = b as u8;
+                bit_idx += 1;
+            }
+            b += 1;
+        }
+        byte += 1;
+    }
+    table
+};
+
 /// A cache-oblivious succinct bit vector.
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -233,6 +254,14 @@ impl BitVector {
         self.len == 0
     }
 
+    /// Raw storage slice (interleaved Rank9 layout).
+    ///
+    /// Used by `EliasFanoIter` to walk the upper bitvector without calling `select1`.
+    #[inline]
+    pub(crate) fn storage(&self) -> &[u64] {
+        &self.storage
+    }
+
     /// Heap memory usage in bytes.
     pub fn heap_bytes(&self) -> usize {
         self.storage.len() * 8 + self.select1_index.len() * 4 + self.select0_index.len() * 4
@@ -337,7 +366,7 @@ impl BitVector {
         }
 
         let word = self.storage[block_idx * 10 + 2 + sub_block_idx];
-        let pos_in_word = self.select_in_word(word, remaining_k - 1);
+        let pos_in_word = Self::select_in_word(word, remaining_k - 1);
         Some(block_idx * 512 + sub_block_idx * 64 + pos_in_word)
     }
 
@@ -400,7 +429,7 @@ impl BitVector {
         }
 
         let word = !self.storage[block_idx * 10 + 2 + sub_block_idx];
-        let pos_in_word = self.select_in_word(word, remaining_k - 1);
+        let pos_in_word = Self::select_in_word(word, remaining_k - 1);
         block_idx * 512 + sub_block_idx * 64 + pos_in_word
     }
 
@@ -464,7 +493,7 @@ impl BitVector {
         count
     }
 
-    fn select_in_word(&self, word: u64, k: usize) -> usize {
+    fn select_in_word(word: u64, k: usize) -> usize {
         #[cfg(all(target_arch = "x86_64", target_feature = "bmi2"))]
         {
             unsafe {
@@ -474,26 +503,18 @@ impl BitVector {
             }
         }
 
-        // Decompose into bytes: find which byte contains the k-th set bit,
-        // then strip within that byte. Max 7 iterations instead of up to 63.
-        let mut remaining = k + 1; // 1-indexed: find the remaining-th set bit
-        let mut byte_base = 0usize;
-        let mut w = word;
-        // Process 8 bytes: isolate each byte's popcount and check if target is within.
-        for _ in 0..7 {
-            let byte_pop = (w & 0xFF).count_ones() as usize;
-            if byte_pop >= remaining {
-                break;
+        // Use the SELECT_IN_BYTE lookup table: find which byte holds the k-th set bit,
+        // then look up the exact bit position within that byte. Max 8 iterations.
+        let mut remaining = k;
+        for byte_idx in 0..8 {
+            let byte = ((word >> (byte_idx * 8)) & 0xFF) as usize;
+            let pop = (byte as u8).count_ones() as usize;
+            if pop > remaining {
+                return byte_idx * 8 + SELECT_IN_BYTE[byte][remaining] as usize;
             }
-            remaining -= byte_pop;
-            byte_base += 8;
-            w >>= 8;
+            remaining -= pop;
         }
-        // Strip (remaining-1) set bits from the current byte and find trailing zeros.
-        for _ in 0..remaining - 1 {
-            w &= w.wrapping_sub(1);
-        }
-        byte_base + w.trailing_zeros() as usize
+        64 // unreachable for valid inputs
     }
 
     /// Return an iterator over the positions of all set bits.

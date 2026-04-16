@@ -125,13 +125,17 @@ impl WaveletTree {
         let mut symbol = 0u32;
         for level in 0..self.depth {
             let bit_pos = self.depth - 1 - level;
+            // Compute rank1 once; use it for both the 1-branch (zeros + r1)
+            // and the 0-branch (i - r1 = rank0), avoiding a redundant rank1 call
+            // inside rank0.
+            let r1 = self.levels[level].rank1(i);
             if self.levels[level].get(i) {
                 // Bit is 1: go right.
                 symbol |= 1 << bit_pos;
-                i = self.zeros[level] + self.levels[level].rank1(i);
+                i = self.zeros[level] + r1;
             } else {
-                // Bit is 0: go left.
-                i = self.levels[level].rank0(i);
+                // Bit is 0: go left (rank0(i) = i - rank1(i)).
+                i -= r1;
             }
         }
         symbol

@@ -357,7 +357,7 @@ impl EliasFano {
         }
         let h_pos = self.upper_bits.select0_unchecked(high);
         let mut rank = h_pos - high; // = rank1(h_pos) = bucket_end
-        let mut pos = h_pos;        // current position in upper bitvec
+        let mut pos = h_pos; // current position in upper bitvec
 
         // Walk backward: subtract elements in the target bucket whose lower bits >= target_low.
         // Each step: if pos-1 is a 1-bit (still in the same bucket) and lower[rank-1] >= target_low,
@@ -399,7 +399,21 @@ impl EliasFano {
 
     /// Return an iterator over all encoded values.
     pub fn iter(&self) -> EliasFanoIter<'_> {
-        EliasFanoIter { ef: self, idx: 0 }
+        // Initialize cursor at the first data word (block 0, word_in_block 0 = storage index 2).
+        let first_word = if self.upper_bits.storage().len() > 2 {
+            self.upper_bits.storage()[2]
+        } else {
+            0
+        };
+        EliasFanoIter {
+            ef: self,
+            idx: 0,
+            upper_word: first_word,
+            upper_block: 0,
+            upper_word_in_block: 0,
+            upper_base_pos: 0,
+            lower_bit_pos: 0,
+        }
     }
 
     /// Heap memory usage in bytes.
@@ -467,21 +481,97 @@ impl EliasFano {
 }
 
 /// Iterator over values in an [`EliasFano`] structure.
+///
+/// Maintains a cursor in the upper bitvector rather than calling `select1` per element,
+/// reducing sequential iteration from O(n log n) to O(n).
 pub struct EliasFanoIter<'a> {
     ef: &'a EliasFano,
+    /// Number of elements emitted so far; also the count of 1-bits consumed.
     idx: usize,
+    /// Current word from the upper bitvector (consumed bits cleared).
+    upper_word: u64,
+    /// Block index into `ef.upper_bits.storage` (0-indexed block).
+    upper_block: usize,
+    /// Word-within-block index (0..8, indexing the 8 data words per block).
+    upper_word_in_block: usize,
+    /// Absolute bit position of bit 0 of `upper_word`.
+    upper_base_pos: usize,
+    /// Bit position in `lower_bits` for the next element's lower bits.
+    lower_bit_pos: usize,
+}
+
+impl EliasFanoIter<'_> {
+    /// Advance the upper cursor to the next non-zero word, returning false if exhausted.
+    #[inline]
+    fn advance_upper_word(&mut self) -> bool {
+        loop {
+            self.upper_word_in_block += 1;
+            if self.upper_word_in_block >= 8 {
+                self.upper_block += 1;
+                self.upper_word_in_block = 0;
+            }
+            let storage_idx = self.upper_block * 10 + 2 + self.upper_word_in_block;
+            let storage = self.ef.upper_bits.storage();
+            if storage_idx >= storage.len() {
+                return false;
+            }
+            self.upper_base_pos = self.upper_block * 512 + self.upper_word_in_block * 64;
+            if self.upper_base_pos >= self.ef.upper_bits.len() {
+                return false;
+            }
+            self.upper_word = storage[storage_idx];
+            if self.upper_word != 0 {
+                return true;
+            }
+        }
+    }
 }
 
 impl Iterator for EliasFanoIter<'_> {
     type Item = u64;
 
+    #[inline]
     fn next(&mut self) -> Option<u64> {
         if self.idx >= self.ef.n {
             return None;
         }
-        let val = self.ef.get(self.idx).unwrap();
+
+        // Find the next set bit in the upper bitvector.
+        while self.upper_word == 0 {
+            if !self.advance_upper_word() {
+                return None;
+            }
+        }
+
+        let bit = self.upper_word.trailing_zeros() as usize;
+        // Clear the lowest set bit.
+        self.upper_word &= self.upper_word.wrapping_sub(1);
+
+        // Absolute position in the upper bitvector.
+        let upper_pos = self.upper_base_pos + bit;
+        // High bits: position minus count of 1-bits seen so far (= zeros before this one).
+        let high = (upper_pos - self.idx) as u64;
+
+        // Low bits from lower_bits array.
+        let low = if self.ef.l == 0 {
+            0
+        } else {
+            let start_bit = self.lower_bit_pos;
+            let word_idx = start_bit / 64;
+            let bit_offset = start_bit % 64;
+            let mut low = self.ef.lower_bits[word_idx] >> bit_offset;
+            if bit_offset + self.ef.l > 64 {
+                let bits_from_next = bit_offset + self.ef.l - 64;
+                low |= (self.ef.lower_bits[word_idx + 1] & ((1 << bits_from_next) - 1))
+                    << (self.ef.l - bits_from_next);
+            }
+            low & ((1u64 << self.ef.l) - 1)
+        };
+
+        self.lower_bit_pos += self.ef.l;
         self.idx += 1;
-        Some(val)
+
+        Some((high << self.ef.l) | low)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
