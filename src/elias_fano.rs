@@ -26,6 +26,9 @@ pub struct EliasFano {
     lower_bits: Vec<u64>,
     l: usize,
     n: usize,
+    /// Number of zeros in `upper_bits` = ceil(universe_size / 2^l) + 1.
+    /// Cached to avoid calling `rank0(len)` in the hot path of `rank()`.
+    num_upper_zeros: usize,
 }
 
 impl EliasFano {
@@ -73,6 +76,7 @@ impl EliasFano {
                 lower_bits: Vec::new(),
                 l: 0,
                 n: 0,
+                num_upper_zeros: 0,
             };
         }
 
@@ -112,7 +116,7 @@ impl EliasFano {
             lower_bits.push(current_word);
         }
 
-        // Upper bits: n ones and U/2^L zeros
+        // Upper bits: n ones and (U/2^L + 1) zeros
         let num_upper_vals = (universe_size >> l) as usize + 1;
         let upper_bv_len = n + num_upper_vals;
         let mut upper_data = vec![0u64; upper_bv_len.div_ceil(64)];
@@ -129,6 +133,7 @@ impl EliasFano {
             lower_bits,
             l,
             n,
+            num_upper_zeros: num_upper_vals,
         }
     }
 
@@ -324,6 +329,14 @@ impl EliasFano {
     }
 
     /// Return the number of encoded values strictly less than `target`.
+    ///
+    /// # Algorithm
+    ///
+    /// One `select0(high)` locates the bucket boundary in the upper bitvector.
+    /// `bucket_end = select0_pos - high` counts elements with high bits ≤ target's high bits.
+    /// A backward walk then subtracts elements whose lower bits ≥ target_low.
+    /// Total cost: one select0 + O(bucket_size_match) lower-bit reads,
+    /// which is typically 0-1 steps for uniformly spaced data.
     pub fn rank(&self, target: u64) -> usize {
         if self.n == 0 {
             return 0;
@@ -332,25 +345,49 @@ impl EliasFano {
         let lower_mask = if self.l == 0 { 0 } else { (1u64 << self.l) - 1 };
         let target_low = target & lower_mask;
 
-        let (bucket_start, bucket_end) = self.bucket_range_fast(high);
-
-        if bucket_start >= bucket_end {
-            return bucket_start;
+        // select0(high) gives the position of the (high+1)-th zero in the upper bitvec.
+        // That position is right after all elements with high bits == high.
+        // rank1 at that position = number of ones before it = number of elements
+        // with high bits <= high = bucket_end.
+        //
+        // high is valid when high < num_upper_zeros = (universe_size >> l) + 1.
+        // For target < universe_size, high = target >> l < (universe_size >> l) + 1.
+        if high >= self.num_upper_zeros {
+            return self.n;
         }
+        let h_pos = self.upper_bits.select0_unchecked(high);
+        let mut rank = h_pos - high; // = rank1(h_pos) = bucket_end
+        let mut pos = h_pos;        // current position in upper bitvec
 
-        // Binary search using only lower bits -- all elements in this bucket share the same
-        // high bits, so comparing lower bits is equivalent to comparing full values.
-        let mut lo = bucket_start;
-        let mut hi = bucket_end;
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            if self.get_lower(mid) < target_low {
-                lo = mid + 1;
-            } else {
-                hi = mid;
+        // Walk backward: subtract elements in the target bucket whose lower bits >= target_low.
+        // Each step: if pos-1 is a 1-bit (still in the same bucket) and lower[rank-1] >= target_low,
+        // decrement both rank and pos.
+        if self.l == 0 {
+            // No lower bits: all elements in bucket count; walk back counting ones before h_pos.
+            // target_low is 0 so any element with equal high bits has low bits >= 0, which means
+            // all of them are >= target_low only when target_low == 0.
+            // Since target_low == 0 always here, we need count of elements with high bits == high.
+            // That count is the number of ones immediately before h_pos (the bucket size).
+            // But we want elements *strictly less than* target = high<<0 | 0 = high,
+            // so elements with high bits < high. That's just bucket_end - bucket_size.
+            // bucket_size = count_ones_before(h_pos), but we need to subtract all of them.
+            rank -= self.upper_bits.count_ones_before(h_pos);
+        } else {
+            // Backward walk: subtract elements at the end of this bucket whose lower bits >= target_low.
+            while pos > 0 && rank > 0 {
+                // pos-1 is always < upper_bits.len() since pos came from select0 (a valid position).
+                if !self.upper_bits.get_unchecked(pos - 1) {
+                    break; // hit a zero: left the bucket
+                }
+                if self.get_lower(rank - 1) < target_low {
+                    break; // this element has lower bits < target_low: stop
+                }
+                rank -= 1;
+                pos -= 1;
             }
         }
-        lo
+
+        rank
     }
 
     /// Return true if `target` is in the encoded sequence.
@@ -417,12 +454,14 @@ impl EliasFano {
         let upper_bits = BitVector::from_bytes(upper_bytes)?;
         r.expect_eof("EliasFano")?;
 
+        let num_upper_zeros = (universe_size >> l) as usize + 1;
         Ok(Self {
             universe_size,
             upper_bits,
             lower_bits,
             l,
             n,
+            num_upper_zeros,
         })
     }
 }

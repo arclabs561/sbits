@@ -250,6 +250,19 @@ impl BitVector {
         (word & (1u64 << bit_in_word)) != 0
     }
 
+    /// Fast unchecked bit access for known-valid positions.
+    ///
+    /// Like `get()` but skips the bounds check. The caller must ensure `i < self.len`.
+    /// Used by EliasFano's rank backward walk to avoid repeated bounds checks.
+    #[inline(always)]
+    pub(crate) fn get_unchecked(&self, i: usize) -> bool {
+        let block_idx = i / 512;
+        let word_in_block = (i % 512) / 64;
+        let bit_in_word = i % 64;
+        let word = self.storage[block_idx * 10 + 2 + word_in_block];
+        (word >> bit_in_word) & 1 != 0
+    }
+
     /// Return the number of set bits in the range [0, i).
     pub fn rank1(&self, i: usize) -> usize {
         if i == 0 {
@@ -333,7 +346,20 @@ impl BitVector {
         if k >= self.rank0(self.len) {
             return None;
         }
+        Some(self.select0_inner(k))
+    }
 
+    /// `select0` without the bounds check; caller must ensure `k < rank0(len)`.
+    ///
+    /// Saves the `rank1(len)` call that `select0` uses for bounds checking.
+    /// Used by EliasFano where `k = target >> l` is always within the valid range.
+    #[inline]
+    pub(crate) fn select0_unchecked(&self, k: usize) -> usize {
+        self.select0_inner(k)
+    }
+
+    #[inline]
+    fn select0_inner(&self, k: usize) -> usize {
         let target = k + 1;
         let select_idx = k / 512;
         let mut block_low = self.select0_index[select_idx] as usize;
@@ -375,7 +401,7 @@ impl BitVector {
 
         let word = !self.storage[block_idx * 10 + 2 + sub_block_idx];
         let pos_in_word = self.select_in_word(word, remaining_k - 1);
-        Some(block_idx * 512 + sub_block_idx * 64 + pos_in_word)
+        block_idx * 512 + sub_block_idx * 64 + pos_in_word
     }
 
     /// Count the number of consecutive set bits immediately before position `pos`.
@@ -448,14 +474,38 @@ impl BitVector {
             }
         }
 
-        // Clear the lowest set bit k times, then the lowest remaining bit is the answer.
-        let mut w = word;
-        for _ in 0..k {
-            debug_assert_ne!(w, 0, "select_in_word: k exceeds popcount");
+        // Broadword select algorithm (Vigna, "Broadword Implementation of Rank/Select Queries").
+        // O(1) arithmetic operations, no branches dependent on data.
+        // Reference: https://vigna.di.unimi.it/ftp/papers/Broadword.pdf
+        const L8: u64 = 0x0101_0101_0101_0101u64; // 1 in every byte
+        const H8: u64 = 0x8080_8080_8080_8080u64; // high bit of every byte
+
+        // Step 1: compute byte-level cumulative popcount using broadword.
+        // s[i] = number of set bits in bytes 0..=i of `word`.
+        let mut s = word.wrapping_sub((word >> 1) & 0x5555_5555_5555_5555u64);
+        s = (s & 0x3333_3333_3333_3333u64) + ((s >> 2) & 0x3333_3333_3333_3333u64);
+        s = s.wrapping_add(s >> 4) & 0x0F0F_0F0F_0F0F_0F0Fu64;
+        // Now s has per-byte popcounts. Compute prefix sums across bytes via multiply.
+        // After multiply by L8: byte i of result = sum of bytes 0..=i of s.
+        let byte_sums = s.wrapping_mul(L8);
+
+        // Find which byte contains the k-th bit using ULEQ comparison.
+        // k_step = k replicated in each byte (k < 64, so this fits in 7 bits).
+        let k_step8 = (k as u64).wrapping_mul(L8);
+        // leq_places[i] = 0x80 if byte_sums[i] <= k_step8[i], else 0.
+        // We want the first byte where cumulative count > k, i.e., where NOT leq.
+        let geq_step8 = ((k_step8 | H8).wrapping_sub(byte_sums & !H8)) & H8;
+        // Count bytes where cumulative count <= k: that's the byte index to search within.
+        let byte_idx = (geq_step8.count_ones() as usize) * 8;
+
+        // Within the identified byte, strip `remaining` set bits.
+        let remaining = k - (byte_sums >> byte_idx).wrapping_sub(1) as u8 as usize;
+        let byte_word = (word >> byte_idx) as u8 as u64;
+        let mut w = byte_word;
+        for _ in 0..remaining {
             w &= w.wrapping_sub(1);
         }
-        debug_assert_ne!(w, 0, "select_in_word: k exceeds popcount");
-        w.trailing_zeros() as usize
+        byte_idx + w.trailing_zeros() as usize
     }
 
     /// Return an iterator over the positions of all set bits.
