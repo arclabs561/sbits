@@ -378,6 +378,66 @@ impl BitVector {
         Some(block_idx * 512 + sub_block_idx * 64 + pos_in_word)
     }
 
+    /// Count the number of consecutive set bits immediately before position `pos`.
+    ///
+    /// Scans backward from `pos - 1`, stopping at the first unset bit or the start.
+    /// Used by EliasFano's `bucket_range_fast` to find a bucket's start element count
+    /// without a second `select0` call.
+    pub(crate) fn count_ones_before(&self, pos: usize) -> usize {
+        if pos == 0 {
+            return 0;
+        }
+        let pos = pos.min(self.len);
+        let mut count = 0usize;
+
+        // Raw word index in the data portion (ignoring block headers).
+        // Block-interleaved: each block is 10 words [abs_rank, rel_ranks, data0..data7].
+        // Raw data word r maps to storage[r/8 * 10 + 2 + r%8].
+        #[inline(always)]
+        fn raw_to_storage(r: usize) -> usize {
+            (r / 8) * 10 + 2 + (r % 8)
+        }
+
+        let end_bit = pos - 1; // highest bit index to examine
+        let mut raw_word = end_bit / 64;
+        let bit_in_word = end_bit % 64; // bit position within first word (0 = LSB)
+
+        // First (possibly partial) word: examine bits [0..=bit_in_word].
+        // We want consecutive 1s from bit_in_word downward.
+        // Strategy: reverse the relevant bits and count trailing zeros of the complement.
+        let w = self.storage[raw_to_storage(raw_word)];
+        // Shift so that bit_in_word becomes bit 63; higher bits are shifted out.
+        let shifted = w << (63 - bit_in_word);
+        // leading_zeros(!shifted) = number of consecutive 1s from bit_in_word downward.
+        let ones = (!shifted).leading_zeros() as usize;
+        count += ones;
+        if ones <= bit_in_word {
+            // Hit a zero -- done.
+            return count;
+        }
+        // Entire relevant portion of this word was ones (ones == bit_in_word + 1).
+        if raw_word == 0 {
+            return count;
+        }
+        raw_word -= 1;
+
+        // Full words: scan backward while all 64 bits are set.
+        loop {
+            let w = self.storage[raw_to_storage(raw_word)];
+            let ones = (!w).leading_zeros() as usize;
+            count += ones;
+            if ones < 64 {
+                break;
+            }
+            if raw_word == 0 {
+                break;
+            }
+            raw_word -= 1;
+        }
+
+        count
+    }
+
     fn select_in_word(&self, word: u64, k: usize) -> usize {
         #[cfg(all(target_arch = "x86_64", target_feature = "bmi2"))]
         {

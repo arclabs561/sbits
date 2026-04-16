@@ -161,27 +161,30 @@ impl EliasFano {
         let high = (pos - i) as u64;
 
         // 2. Get low bits from lower_bits.
-        //
-        // Important edge case: when `l == 0`, there is no low part and `lower_bits` is empty.
-        // (This occurs for small universes or high density where U/n <= 1.)
-        let low: u64 = if self.l == 0 {
-            0
-        } else {
-            let start_bit = i * self.l;
-            let word_idx = start_bit / 64;
-            let bit_offset = start_bit % 64;
-
-            let mut low = self.lower_bits[word_idx] >> bit_offset;
-            if bit_offset + self.l > 64 {
-                let bits_from_next = bit_offset + self.l - 64;
-                low |= (self.lower_bits[word_idx + 1] & ((1 << bits_from_next) - 1))
-                    << (self.l - bits_from_next);
-            }
-            low &= (1 << self.l) - 1;
-            low
-        };
+        let low = self.get_lower(i);
 
         Ok((high << self.l) | low)
+    }
+
+    /// Read only the lower `l` bits for element at index `i`, without touching the upper bitvector.
+    ///
+    /// When `l == 0` (high-density case where `U/n <= 1`), `lower_bits` is empty and returns 0.
+    #[inline]
+    fn get_lower(&self, i: usize) -> u64 {
+        if self.l == 0 {
+            return 0;
+        }
+        let start_bit = i * self.l;
+        let word_idx = start_bit / 64;
+        let bit_offset = start_bit % 64;
+
+        let mut low = self.lower_bits[word_idx] >> bit_offset;
+        if bit_offset + self.l > 64 {
+            let bits_from_next = bit_offset + self.l - 64;
+            low |= (self.lower_bits[word_idx + 1] & ((1 << bits_from_next) - 1))
+                << (self.l - bits_from_next);
+        }
+        low & ((1 << self.l) - 1)
     }
 
     /// Return the smallest value >= `target`, or `None` if no such value exists.
@@ -201,31 +204,35 @@ impl EliasFano {
             return None;
         }
 
-        // Use select0 on upper bitvector to narrow search to one bucket.
-        // In the upper bitvec, zeros separate buckets by high-bit value.
-        // select0(h) gives the end of bucket h; rank1 there gives the element count.
         let high = (target >> self.l) as usize;
+        let lower_mask = if self.l == 0 { 0 } else { (1u64 << self.l) - 1 };
+        let target_low = target & lower_mask;
 
-        let (bucket_start, bucket_end) = self.bucket_range(high);
+        // select0(high) gives the position in the upper bitvec of the (high+1)-th zero,
+        // which is the boundary after bucket `high`. rank1 at that position is bucket_end.
+        let (bucket_start, bucket_end) = self.bucket_range_fast(high);
 
         if bucket_start < bucket_end {
-            // Binary search within the bucket for first element >= target.
+            // Binary search within bucket using only lower bits -- no select1 calls.
+            // All elements in this bucket share the same high bits, so comparing lower
+            // bits is equivalent to comparing full values.
             let mut lo = bucket_start;
             let mut hi = bucket_end;
             while lo < hi {
                 let mid = lo + (hi - lo) / 2;
-                if self.get(mid).unwrap() < target {
+                if self.get_lower(mid) < target_low {
                     lo = mid + 1;
                 } else {
                     hi = mid;
                 }
             }
             if lo < bucket_end {
-                return Some(self.get(lo).unwrap());
+                // Reconstruct the value: use get_lower (no select1) since we already have high.
+                return Some(((high as u64) << self.l) | self.get_lower(lo));
             }
         }
 
-        // Not found in this bucket; successor is the first element in the next non-empty bucket.
+        // No match in this bucket; successor is the first element in the next non-empty bucket.
         let next_start = bucket_end;
         if next_start < self.n {
             Some(self.get(next_start).unwrap())
@@ -252,22 +259,26 @@ impl EliasFano {
         }
 
         let high = (target >> self.l) as usize;
-        let (bucket_start, bucket_end) = self.bucket_range(high);
+        let lower_mask = if self.l == 0 { 0 } else { (1u64 << self.l) - 1 };
+        let target_low = target & lower_mask;
+
+        let (bucket_start, bucket_end) = self.bucket_range_fast(high);
 
         if bucket_start < bucket_end {
-            // Binary search within the bucket for last element <= target.
+            // Binary search within the bucket for last element <= target using only lower bits.
             let mut lo = bucket_start;
             let mut hi = bucket_end;
             while lo < hi {
                 let mid = lo + (hi - lo) / 2;
-                if self.get(mid).unwrap() <= target {
+                if self.get_lower(mid) <= target_low {
                     lo = mid + 1;
                 } else {
                     hi = mid;
                 }
             }
             if lo > bucket_start {
-                return Some(self.get(lo - 1).unwrap());
+                let idx = lo - 1;
+                return Some(((high as u64) << self.l) | self.get_lower(idx));
             }
         }
 
@@ -280,20 +291,31 @@ impl EliasFano {
     }
 
     /// Return the index range [start, end) of elements in the given upper-bits bucket.
-    fn bucket_range(&self, high: usize) -> (usize, usize) {
-        let start = if high == 0 {
-            0
-        } else {
-            match self.upper_bits.select0(high - 1) {
-                Some(pos) => self.upper_bits.rank1(pos + 1),
-                None => self.n,
+    ///
+    /// Uses a single `select0` call plus a backward bit scan, avoiding the second `select0`
+    /// that the naive two-select approach would need. The backward scan counts consecutive
+    /// ones immediately before `end_pos`; that count equals the size of this bucket.
+    #[inline]
+    fn bucket_range_fast(&self, high: usize) -> (usize, usize) {
+        // Position of the (high+1)-th zero = the boundary after bucket `high`.
+        let end_pos = match self.upper_bits.select0(high) {
+            Some(pos) => pos,
+            None => {
+                // high is beyond all zeros -- return past-end sentinel.
+                return (self.n, self.n);
             }
         };
-        let end = match self.upper_bits.select0(high) {
-            Some(pos) => self.upper_bits.rank1(pos),
-            None => self.n,
-        };
-        (start, end)
+
+        // rank1(end_pos) = number of elements with high bits <= high = bucket_end.
+        let bucket_end = self.upper_bits.rank1(end_pos);
+
+        // Count the ones immediately preceding end_pos by scanning backward word-by-word.
+        // All bits from (previous zero + 1) to (end_pos - 1) are ones; that count is the
+        // bucket size. We scan at most one 64-bit word in the common case.
+        let bucket_size = self.upper_bits.count_ones_before(end_pos);
+        let bucket_start = bucket_end.saturating_sub(bucket_size);
+
+        (bucket_start, bucket_end)
     }
 
     /// Alias for [`successor`](Self::successor) -- the standard name in IR literature.
@@ -307,17 +329,22 @@ impl EliasFano {
             return 0;
         }
         let high = (target >> self.l) as usize;
-        let (bucket_start, bucket_end) = self.bucket_range(high);
+        let lower_mask = if self.l == 0 { 0 } else { (1u64 << self.l) - 1 };
+        let target_low = target & lower_mask;
+
+        let (bucket_start, bucket_end) = self.bucket_range_fast(high);
 
         if bucket_start >= bucket_end {
             return bucket_start;
         }
 
+        // Binary search using only lower bits -- all elements in this bucket share the same
+        // high bits, so comparing lower bits is equivalent to comparing full values.
         let mut lo = bucket_start;
         let mut hi = bucket_end;
         while lo < hi {
             let mid = lo + (hi - lo) / 2;
-            if self.get(mid).unwrap() < target {
+            if self.get_lower(mid) < target_low {
                 lo = mid + 1;
             } else {
                 hi = mid;
