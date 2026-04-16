@@ -21,7 +21,7 @@ Dual-licensed under MIT or Apache-2.0.
 
 ```toml
 [dependencies]
-sbits = "0.2.0"
+sbits = "0.2"
 ```
 
 ```rust
@@ -42,7 +42,7 @@ assert_eq!(ef.predecessor(25), Some(20));
 assert!(ef.contains(30));
 
 // Iterate all values
-let all: Vec<u32> = ef.iter().collect();
+let all: Vec<u64> = ef.iter().collect();
 assert_eq!(all, vec![10, 20, 30, 100, 1000]);
 ```
 
