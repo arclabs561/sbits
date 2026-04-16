@@ -25,7 +25,14 @@ serde = { version = "1", features = ["derive"], optional = true }
 [dev-dependencies]
 proptest = "1.5"
 criterion = "0.5"
+sucds = "0.8"
+vers-vecs = "1.9"
+sux = { version = "0.14", default-features = false }
 
 [[bench]]
 name = "succ_bench"
+harness = false
+
+[[bench]]
+name = "comparison"
 harness = false
