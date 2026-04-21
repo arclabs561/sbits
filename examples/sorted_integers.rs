@@ -14,9 +14,7 @@ use sbits::elias_fano::EliasFano;
 
 fn main() {
     // Simulate a posting list: 1000 doc IDs out of a 1M-document corpus.
-    let mut values: Vec<u64> = (0..1_000_000u64)
-        .step_by(1000)
-        .collect();
+    let mut values: Vec<u64> = (0..1_000_000u64).step_by(1000).collect();
     // Add some irregular gaps to make it realistic.
     values.push(42);
     values.push(7777);
