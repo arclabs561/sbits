@@ -4,7 +4,9 @@
 [![Documentation](https://docs.rs/sbits/badge.svg)](https://docs.rs/sbits)
 [![CI](https://github.com/arclabs561/sbits/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/sbits/actions/workflows/ci.yml)
 
-Succinct data structures.
+Succinct data structures in Rust: bit vectors with rank/select,
+Elias-Fano (plain and partitioned), and wavelet trees. Near-optimal
+space with O(1) / O(log n) queries.
 
 Dual-licensed under MIT or Apache-2.0.
 
