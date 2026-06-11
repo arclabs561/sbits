@@ -9,3 +9,4 @@ sbits-python/.venv/
 sbits-python/Cargo.lock
 
 .claude/settings.local.json
+/semver-checks/
