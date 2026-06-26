@@ -61,3 +61,10 @@ let bytes = ef.to_bytes();
 let ef2 = EliasFano::from_bytes(&bytes).unwrap();
 assert_eq!(ef2.get(0).unwrap(), 10);
 ```
+
+## Examples
+
+Runnable examples live in [`examples/`](examples/):
+
+- `sorted_integers` packs a simulated posting list (1000 doc IDs out of a 1M-document corpus) with Elias-Fano, the realistic doc-id-compression use.
+- `elias_fano_validation` checks Elias-Fano against a naive reference on random monotone sequences, the correctness guard for the succinct encoding.
