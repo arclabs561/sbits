@@ -32,7 +32,7 @@ Dual-licensed under MIT or Apache-2.0.
 
 ```toml
 [dependencies]
-sbits = "0.2"
+sbits = "0.2.3"
 ```
 
 ```rust
@@ -86,5 +86,5 @@ assert_eq!(ef2.get(0).unwrap(), 10);
 
 Runnable examples live in [`examples/`](examples/):
 
-- `sorted_integers` packs a simulated posting list (1000 doc IDs out of a 1M-document corpus) with Elias-Fano, the realistic doc-id-compression use.
+- `sorted_integers` packs a simulated posting list (1000 doc IDs out of a 1M-document corpus) with Elias-Fano.
 - `wavelet_sequence` runs access, rank, and select over a small-alphabet symbol stream.
