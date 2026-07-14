@@ -74,12 +74,15 @@ class EliasFano:
     """
 
     def __init__(
-        self, values: Union[NDArray[np.uint32], NDArray[np.int64], list[int]]
+        self,
+        values: Union[
+            NDArray[np.uint32], NDArray[np.uint64], NDArray[np.int64], list[int]
+        ],
     ) -> None:
         """Construct from a sorted sequence of non-negative integers.
 
         Args:
-            values: Sorted values as numpy array (uint32 or int64) or list.
+            values: Sorted values as numpy array (uint32, uint64, or int64) or list.
         """
         ...
 
@@ -91,8 +94,8 @@ class EliasFano:
         """Return True if the value is present (linear scan)."""
         ...
 
-    def to_numpy(self) -> NDArray[np.uint32]:
-        """Export all values as a numpy uint32 array."""
+    def to_numpy(self) -> NDArray[np.uint64]:
+        """Export all values as a numpy uint64 array."""
         ...
 
     def to_bytes(self) -> bytes:
@@ -118,13 +121,15 @@ class PartitionedEliasFano:
 
     def __init__(
         self,
-        values: Union[NDArray[np.uint32], NDArray[np.int64], list[int]],
+        values: Union[
+            NDArray[np.uint32], NDArray[np.uint64], NDArray[np.int64], list[int]
+        ],
         block_size: int = 128,
     ) -> None:
         """Construct from a sorted sequence.
 
         Args:
-            values: Sorted values as numpy array (uint32 or int64) or list.
+            values: Sorted values as numpy array (uint32, uint64, or int64) or list.
             block_size: Maximum number of items per block (default 128).
         """
         ...
@@ -153,9 +158,7 @@ class WaveletTree:
     Space: n*ceil(log2(sigma)) + o(n*log(sigma)) bits.
     """
 
-    def __init__(
-        self, data: Union[NDArray[np.uint32], list[int]], sigma: int
-    ) -> None:
+    def __init__(self, data: Union[NDArray[np.uint32], list[int]], sigma: int) -> None:
         """Construct from a sequence and alphabet size.
 
         Args:

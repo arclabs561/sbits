@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Tightened crate-level docs around the public data-structure contract.
+- Aligned the Python Elias-Fano bindings with the 64-bit core API. NumPy exports now use `uint64`; `uint32` inputs remain accepted.
 
 ## [0.2.3] - 2026-06-11
 

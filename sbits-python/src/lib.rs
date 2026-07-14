@@ -1,7 +1,36 @@
 use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::{PyIndexError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyOverflowError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyType;
+
+fn extract_u64_values(values: &Bound<'_, PyAny>) -> PyResult<Vec<u64>> {
+    if let Ok(arr) = values.extract::<PyReadonlyArray1<u64>>() {
+        Ok(arr.as_array().to_vec())
+    } else if let Ok(arr) = values.extract::<PyReadonlyArray1<u32>>() {
+        Ok(arr.as_array().iter().copied().map(u64::from).collect())
+    } else if let Ok(arr) = values.extract::<PyReadonlyArray1<i64>>() {
+        arr.as_array()
+            .iter()
+            .map(|&value| {
+                u64::try_from(value).map_err(|_| {
+                    PyOverflowError::new_err(format!("value {value} out of u64 range"))
+                })
+            })
+            .collect()
+    } else {
+        values.extract::<Vec<u64>>()
+    }
+}
+
+fn elias_fano_universe(values: &[u64]) -> PyResult<u64> {
+    values.last().map_or(Ok(0), |&value| {
+        value.checked_add(1).ok_or_else(|| {
+            PyOverflowError::new_err(
+                "u64::MAX cannot be represented because the Elias-Fano universe would overflow",
+            )
+        })
+    })
+}
 
 // ---------------------------------------------------------------------------
 // BitVector
@@ -173,27 +202,12 @@ struct EliasFano {
 
 #[pymethods]
 impl EliasFano {
-    /// Construct from a sorted sequence (list[int] or numpy uint32/int64 array).
+    /// Construct from a sorted sequence (list[int] or numpy uint32/uint64/int64 array).
     ///
     /// Values must be in non-decreasing order.
     #[new]
     fn new(values: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let vals: Vec<u32> = if let Ok(arr) = values.extract::<PyReadonlyArray1<u32>>() {
-            arr.as_array().to_vec()
-        } else if let Ok(arr) = values.extract::<PyReadonlyArray1<i64>>() {
-            arr.as_array()
-                .iter()
-                .map(|&v| {
-                    u32::try_from(v).map_err(|_| {
-                        pyo3::exceptions::PyOverflowError::new_err(format!(
-                            "value {v} out of u32 range"
-                        ))
-                    })
-                })
-                .collect::<PyResult<Vec<u32>>>()?
-        } else {
-            values.extract::<Vec<u32>>()?
-        };
+        let vals = extract_u64_values(values)?;
         for i in 1..vals.len() {
             if vals[i] < vals[i - 1] {
                 return Err(PyValueError::new_err(format!(
@@ -204,41 +218,41 @@ impl EliasFano {
                 )));
             }
         }
-        let universe = vals.last().map(|&v| v + 1).unwrap_or(0);
+        let universe = elias_fano_universe(&vals)?;
         Ok(Self {
             inner: sbits_core::EliasFano::new(&vals, universe),
         })
     }
 
     /// Return the value at index i. O(1) time.
-    fn get(&self, i: usize) -> PyResult<u32> {
+    fn get(&self, i: usize) -> PyResult<u64> {
         self.inner
             .get(i)
             .map_err(|e| PyIndexError::new_err(e.to_string()))
     }
 
     /// Return True if the value is present. O(log n) time.
-    fn contains(&self, value: u32) -> bool {
+    fn contains(&self, value: u64) -> bool {
         self.inner.contains(value)
     }
 
     /// Smallest value >= target, or None.
-    fn successor(&self, target: u32) -> Option<u32> {
+    fn successor(&self, target: u64) -> Option<u64> {
         self.inner.successor(target)
     }
 
     /// Largest value <= target, or None.
-    fn predecessor(&self, target: u32) -> Option<u32> {
+    fn predecessor(&self, target: u64) -> Option<u64> {
         self.inner.predecessor(target)
     }
 
     /// Alias for successor (standard IR name).
-    fn next_geq(&self, target: u32) -> Option<u32> {
+    fn next_geq(&self, target: u64) -> Option<u64> {
         self.inner.next_geq(target)
     }
 
-    /// Export all values as a numpy uint32 array.
-    fn to_numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<u32>>> {
+    /// Export all values as a numpy uint64 array.
+    fn to_numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<u64>>> {
         let n = self.inner.len();
         let mut vals = Vec::with_capacity(n);
         for i in 0..n {
@@ -272,11 +286,11 @@ impl EliasFano {
         self.inner.len()
     }
 
-    fn __contains__(&self, value: u32) -> bool {
+    fn __contains__(&self, value: u64) -> bool {
         self.contains(value)
     }
 
-    fn __getitem__(&self, i: isize) -> PyResult<u32> {
+    fn __getitem__(&self, i: isize) -> PyResult<u64> {
         let len = self.inner.len() as isize;
         let idx = if i < 0 { len + i } else { i };
         if idx < 0 || idx >= len {
@@ -316,35 +330,20 @@ impl PartitionedEliasFano {
     /// Construct from a sorted sequence and block size.
     ///
     /// Args:
-    ///     values: Sorted values as numpy array (uint32 or int64) or list.
+    ///     values: Sorted values as numpy array (uint32, uint64, or int64) or list.
     ///     block_size: Maximum number of items per block (default 128).
     #[new]
     #[pyo3(signature = (values, block_size=128))]
     fn new(values: &Bound<'_, PyAny>, block_size: usize) -> PyResult<Self> {
-        let vals: Vec<u32> = if let Ok(arr) = values.extract::<PyReadonlyArray1<u32>>() {
-            arr.as_array().to_vec()
-        } else if let Ok(arr) = values.extract::<PyReadonlyArray1<i64>>() {
-            arr.as_array()
-                .iter()
-                .map(|&v| {
-                    u32::try_from(v).map_err(|_| {
-                        pyo3::exceptions::PyOverflowError::new_err(format!(
-                            "value {v} out of u32 range"
-                        ))
-                    })
-                })
-                .collect::<PyResult<Vec<u32>>>()?
-        } else {
-            values.extract::<Vec<u32>>()?
-        };
-        let universe = vals.last().map(|&v| v + 1).unwrap_or(0);
+        let vals = extract_u64_values(values)?;
+        let universe = elias_fano_universe(&vals)?;
         Ok(Self {
             inner: sbits_core::PartitionedEliasFano::new(&vals, universe, block_size),
         })
     }
 
     /// Return the value at index i. O(1) time.
-    fn get(&self, i: usize) -> PyResult<u32> {
+    fn get(&self, i: usize) -> PyResult<u64> {
         self.inner
             .get(i)
             .map_err(|e| PyIndexError::new_err(e.to_string()))
@@ -371,7 +370,7 @@ impl PartitionedEliasFano {
         self.inner.len()
     }
 
-    fn __getitem__(&self, i: isize) -> PyResult<u32> {
+    fn __getitem__(&self, i: isize) -> PyResult<u64> {
         let len = self.inner.len() as isize;
         let idx = if i < 0 { len + i } else { i };
         if idx < 0 || idx >= len {

@@ -139,12 +139,25 @@ def test_elias_fano_from_numpy_int64():
     assert ef[3] == 100
 
 
+def test_elias_fano_from_numpy_uint64_above_u32():
+    values = np.array([10, 2**32 + 17], dtype=np.uint64)
+    ef = EliasFano(values)
+    assert ef[1] == 2**32 + 17
+    assert ef.successor(2**32) == 2**32 + 17
+    assert ef.predecessor(2**32 + 18) == 2**32 + 17
+
+
 def test_elias_fano_to_numpy():
     ef = EliasFano([10, 20, 30, 100])
     arr = ef.to_numpy()
     assert isinstance(arr, np.ndarray)
-    assert arr.dtype == np.uint32
+    assert arr.dtype == np.uint64
     assert list(arr) == [10, 20, 30, 100]
+
+
+def test_elias_fano_rejects_unrepresentable_universe():
+    with pytest.raises(OverflowError, match="universe would overflow"):
+        EliasFano([2**64 - 1])
 
 
 def test_wavelet_tree_from_numpy():
@@ -281,6 +294,12 @@ def test_partitioned_elias_fano_numpy():
     assert len(pef) == 4
     assert pef[0] == 5
     assert pef[3] == 20
+
+
+def test_partitioned_elias_fano_uint64_above_u32():
+    values = np.array([5, 2**32 + 17], dtype=np.uint64)
+    pef = PartitionedEliasFano(values, block_size=2)
+    assert pef[1] == 2**32 + 17
 
 
 # ---------------------------------------------------------------------------

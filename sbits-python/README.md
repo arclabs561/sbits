@@ -47,7 +47,7 @@ wt.select(3, 0)  # 0 -- position of first 3
 | `EliasFano.contains(v)` | Membership test, O(log n) |
 | `EliasFano.successor(v)` | Smallest value >= v, O(log bucket) |
 | `EliasFano.predecessor(v)` | Largest value <= v, O(log bucket) |
-| `EliasFano.to_numpy()` | Export as numpy uint32 array |
+| `EliasFano.to_numpy()` | Export as numpy uint64 array |
 | `WaveletTree(data, sigma)` | Construct from symbol sequence and alphabet size |
 | `WaveletTree.rank(sym, i)` | Count occurrences of sym in [0, i), O(log sigma) |
 | `WaveletTree.select(sym, k)` | Position of k-th occurrence of sym, O(log sigma) |
