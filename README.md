@@ -24,7 +24,7 @@ Dual-licensed under MIT or Apache-2.0.
 | Structure | What it does |
 |-----------|-------------|
 | `BitVector` | Rank/select over bits in O(1)/O(log n) with Rank9 interleaved layout |
-| `EliasFano` | Sorted integers in near-optimal space with O(1) access, O(1) avg successor |
+| `EliasFano` | Sorted integers in near-optimal space with O(1) access and successor queries |
 | `PartitionedEliasFano` | Block-local Elias-Fano for clustered sequences |
 | `WaveletTree` | Rank/select over arbitrary alphabets in O(log sigma) |
 
