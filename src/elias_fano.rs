@@ -1,7 +1,7 @@
 //! Elias-Fano encoding for monotone sequences.
 //!
 //! Provides near-optimal space for sorted integers while allowing
-//! $O(1)$ random access to any element.
+//! random access via bit-vector select, which binary-searches indexed blocks.
 //!
 //! # Theory
 //!
