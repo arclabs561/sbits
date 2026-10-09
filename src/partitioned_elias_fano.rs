@@ -10,6 +10,9 @@
 //! - blocks are encoded as independent `EliasFano` structures over values shifted by the block base
 //! - access is `O(1)` block indexing + `O(1)` `EliasFano::get`
 //! - serialization is stable and versioned
+//! - blocks have a fixed size; this is not the cost-optimal partition of Ottaviano and
+//!   Venturini (SIGIR 2014), and per-block overhead can make the result larger than plain
+//!   `EliasFano`, so measure on your data
 //!
 //! It assumes the input values are sorted (monotone) and all `< universe_size`.
 
@@ -21,12 +24,35 @@ use alloc::{format, string::ToString};
 /// Partitioned Elias–Fano encoding.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "PartitionedEliasFanoParts"))]
 pub struct PartitionedEliasFano {
     universe_size: u64,
     block_size: usize,
     n: usize,
     bases: Vec<u64>,
     blocks: Vec<EliasFano>,
+}
+
+/// Serde input for [`PartitionedEliasFano`]: the same fields, checked like
+/// `from_bytes` input before a value is built.
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+#[serde(rename = "PartitionedEliasFano")]
+struct PartitionedEliasFanoParts {
+    universe_size: u64,
+    block_size: usize,
+    n: usize,
+    bases: Vec<u64>,
+    blocks: Vec<EliasFano>,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<PartitionedEliasFanoParts> for PartitionedEliasFano {
+    type Error = Error;
+
+    fn try_from(p: PartitionedEliasFanoParts) -> Result<Self> {
+        Self::from_checked_parts(p.universe_size, p.block_size, p.n, p.bases, p.blocks)
+    }
 }
 
 impl PartitionedEliasFano {
@@ -183,7 +209,25 @@ impl PartitionedEliasFano {
             blocks.push(ef);
         }
         r.expect_eof("PartitionedEliasFano")?;
+        Self::from_checked_parts(universe_size, block_size, n, bases, blocks)
+    }
 
+    /// Build from decoded parts, rejecting counts that disagree with the
+    /// blocks. Shared by `from_bytes` and serde deserialization.
+    fn from_checked_parts(
+        universe_size: u64,
+        block_size: usize,
+        n: usize,
+        bases: Vec<u64>,
+        blocks: Vec<EliasFano>,
+    ) -> Result<Self> {
+        if bases.len() != blocks.len() {
+            return Err(Error::InvalidEncoding(format!(
+                "PEF has {} bases for {} blocks",
+                bases.len(),
+                blocks.len()
+            )));
+        }
         if block_size == 0 {
             return Err(Error::InvalidEncoding(
                 "block_size must be >= 1".to_string(),

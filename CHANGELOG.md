@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so corrupt input errors instead of panicking or answering wrongly.
 - `EliasFano::from_bytes` rejects counts that do not match its lower and
   upper bit arrays.
+- Serde deserialization of `BitVector`, `EliasFano`, `PartitionedEliasFano`
+  and `WaveletTree` now runs the same checks as `from_bytes` instead of
+  accepting any field values. The serialized form is unchanged.
+- `WaveletTree::from_bytes` rejects a depth, level length or zero boundary
+  that disagrees with the level bits.
 
 ## [0.2.3] - 2026-06-11
 

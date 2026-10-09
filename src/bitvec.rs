@@ -41,6 +41,7 @@ const SELECT_IN_BYTE: [[u8; 8]; 256] = {
 /// A cache-oblivious succinct bit vector.
 #[derive(Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "BitVectorParts"))]
 pub struct BitVector {
     /// Interleaved data: [abs_rank, rel_ranks, data0, ..., data7, ...]
     storage: Vec<u64>,
@@ -49,6 +50,27 @@ pub struct BitVector {
     /// Coarse index for select0: stores block index for every 512th zero-bit
     select0_index: Vec<u32>,
     len: usize,
+}
+
+/// Serde input for [`BitVector`]: the same fields, checked by
+/// [`BitVector::from_parts`] before a value is built.
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+#[serde(rename = "BitVector")]
+struct BitVectorParts {
+    storage: Vec<u64>,
+    select1_index: Vec<u32>,
+    select0_index: Vec<u32>,
+    len: usize,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<BitVectorParts> for BitVector {
+    type Error = crate::error::Error;
+
+    fn try_from(p: BitVectorParts) -> crate::error::Result<Self> {
+        Self::from_parts(p.storage, p.select1_index, p.select0_index, p.len)
+    }
 }
 
 impl core::fmt::Debug for BitVector {

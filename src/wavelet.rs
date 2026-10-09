@@ -10,6 +10,7 @@
 
 use crate::bitvec::BitVector;
 use crate::error::{ByteReader, Result};
+use alloc::format;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -21,6 +22,7 @@ use alloc::vec::Vec;
 /// traditional wavelet tree.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "WaveletTreeParts"))]
 pub struct WaveletTree {
     /// One bitvector per bit-level, from MSB (index 0) to LSB.
     levels: Vec<BitVector>,
@@ -30,6 +32,28 @@ pub struct WaveletTree {
     sigma: u32,
     /// Number of bit-levels: ceil(log2(sigma)), or 0 if sigma <= 1.
     depth: usize,
+}
+
+/// Serde input for [`WaveletTree`]: the same fields, checked like
+/// `from_bytes` input before a value is built.
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+#[serde(rename = "WaveletTree")]
+struct WaveletTreeParts {
+    levels: Vec<BitVector>,
+    zeros: Vec<usize>,
+    len: usize,
+    sigma: u32,
+    depth: usize,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<WaveletTreeParts> for WaveletTree {
+    type Error = crate::error::Error;
+
+    fn try_from(p: WaveletTreeParts) -> Result<Self> {
+        Self::from_checked_parts(p.levels, p.zeros, p.len, p.sigma, p.depth)
+    }
 }
 
 impl WaveletTree {
@@ -237,6 +261,36 @@ impl WaveletTree {
         }
 
         r.expect_eof("WaveletMatrix")?;
+        Self::from_checked_parts(levels, zeros, len, sigma, depth)
+    }
+
+    /// Build from decoded parts, rejecting a depth, level length or zero
+    /// boundary that disagrees with the level bits. Shared by `from_bytes`
+    /// and serde deserialization.
+    fn from_checked_parts(
+        levels: Vec<BitVector>,
+        zeros: Vec<usize>,
+        len: usize,
+        sigma: u32,
+        depth: usize,
+    ) -> Result<Self> {
+        let expected_depth = if sigma <= 1 {
+            0
+        } else {
+            (u32::BITS - (sigma - 1).leading_zeros()) as usize
+        };
+        let consistent = depth == expected_depth
+            && levels.len() == depth
+            && zeros.len() == depth
+            && levels
+                .iter()
+                .zip(&zeros)
+                .all(|(level, &z)| level.len() == len && level.rank0(len) == z);
+        if !consistent {
+            return Err(crate::error::Error::InvalidEncoding(format!(
+                "WaveletMatrix levels do not match len={len}, sigma={sigma}, depth={depth}"
+            )));
+        }
         Ok(Self {
             levels,
             zeros,

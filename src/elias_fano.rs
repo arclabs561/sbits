@@ -20,6 +20,7 @@ use alloc::vec::Vec;
 /// Elias-Fano encoding structure.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "EliasFanoParts"))]
 pub struct EliasFano {
     universe_size: u64,
     upper_bits: BitVector,
@@ -29,6 +30,36 @@ pub struct EliasFano {
     /// Number of zeros in `upper_bits` = ceil(universe_size / 2^l) + 1.
     /// Cached to avoid calling `rank0(len)` in the hot path of `rank()`.
     num_upper_zeros: usize,
+}
+
+/// Serde input for [`EliasFano`]: the same fields, checked like `from_bytes`
+/// input before a value is built.
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+#[serde(rename = "EliasFano")]
+struct EliasFanoParts {
+    universe_size: u64,
+    upper_bits: BitVector,
+    lower_bits: Vec<u64>,
+    l: usize,
+    n: usize,
+    num_upper_zeros: usize,
+}
+
+#[cfg(feature = "serde")]
+impl TryFrom<EliasFanoParts> for EliasFano {
+    type Error = Error;
+
+    fn try_from(p: EliasFanoParts) -> Result<Self> {
+        let ef = Self::from_checked_parts(p.universe_size, p.upper_bits, p.lower_bits, p.l, p.n)?;
+        if ef.num_upper_zeros != p.num_upper_zeros {
+            return Err(Error::InvalidEncoding(format!(
+                "EliasFano num_upper_zeros ({}) does not match universe and l ({})",
+                p.num_upper_zeros, ef.num_upper_zeros
+            )));
+        }
+        Ok(ef)
+    }
 }
 
 impl EliasFano {
@@ -467,7 +498,23 @@ impl EliasFano {
         let upper_bytes = r.take(upper_len)?;
         let upper_bits = BitVector::from_bytes(upper_bytes)?;
         r.expect_eof("EliasFano")?;
+        Self::from_checked_parts(universe_size, upper_bits, lower_bits, l, n)
+    }
 
+    /// Build from decoded parts, rejecting counts that disagree with the bit
+    /// arrays. Shared by `from_bytes` and serde deserialization.
+    fn from_checked_parts(
+        universe_size: u64,
+        upper_bits: BitVector,
+        lower_bits: Vec<u64>,
+        l: usize,
+        n: usize,
+    ) -> Result<Self> {
+        if l > 63 {
+            return Err(Error::InvalidEncoding(format!(
+                "EliasFano l={l} exceeds maximum (63) for u64 values"
+            )));
+        }
         let num_upper_zeros = ((universe_size >> l) as usize).saturating_add(1);
         // Accessors index `lower_bits` by `i * l` and `upper_bits` by
         // select over `n` ones and `num_upper_zeros` zeros; check the persisted
