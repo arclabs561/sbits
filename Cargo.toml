@@ -8,9 +8,11 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/arclabs561/sbits"
 homepage = "https://github.com/arclabs561/sbits"
 documentation = "https://docs.rs/sbits"
+rust-version = "1.87"
 readme = "README.md"
 keywords = ["succinct", "bitvec", "rank-select"]
 categories = ["data-structures", "algorithms", "no-std"]
+include = ["/src", "/tests", "/examples", "/benches", "/README.md", "/CHANGELOG.md", "/LICENSE*"]
 
 [workspace]
 
@@ -28,6 +30,7 @@ criterion = "0.5"
 sucds = "0.8"
 vers-vecs = "1.9"
 sux = { version = "0.14", default-features = false }
+serde_json = "1"
 
 [[bench]]
 name = "succ_bench"
