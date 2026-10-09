@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 //! Succinct data structures.
 //!
 //! This crate provides static structures that store bits, monotone integer
