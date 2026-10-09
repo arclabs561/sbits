@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tightened crate-level docs around the public data-structure contract.
 - Aligned the Python Elias-Fano bindings with the 64-bit core API. NumPy exports now use `uint64`; `uint32` inputs remain accepted.
 
+### Fixed
+
+- `BitVector::from_bytes` (and `from_parts`) rebuild the rank/select index
+  from the data words and reject input whose persisted index does not match,
+  so corrupt input errors instead of panicking or answering wrongly.
+- `EliasFano::from_bytes` rejects counts that do not match its lower and
+  upper bit arrays.
+
 ## [0.2.3] - 2026-06-11
 
 Maintenance release.

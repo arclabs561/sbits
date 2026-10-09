@@ -468,7 +468,23 @@ impl EliasFano {
         let upper_bits = BitVector::from_bytes(upper_bytes)?;
         r.expect_eof("EliasFano")?;
 
-        let num_upper_zeros = (universe_size >> l) as usize + 1;
+        let num_upper_zeros = ((universe_size >> l) as usize).saturating_add(1);
+        // Accessors index `lower_bits` by `i * l` and `upper_bits` by
+        // select over `n` ones and `num_upper_zeros` zeros; check the persisted
+        // counts agree with the parts so corrupt input errors instead of
+        // indexing out of bounds.
+        let consistent = if n == 0 {
+            upper_bits.is_empty() && lower_bits.is_empty()
+        } else {
+            n.checked_mul(l).map(|b| b.div_ceil(64)) == Some(lower_bits.len())
+                && n.checked_add(num_upper_zeros) == Some(upper_bits.len())
+                && upper_bits.rank1(upper_bits.len()) == n
+        };
+        if !consistent {
+            return Err(Error::InvalidEncoding(format!(
+                "EliasFano counts (n={n}, l={l}) do not match its lower/upper bit arrays"
+            )));
+        }
         Ok(Self {
             universe_size,
             upper_bits,
@@ -663,5 +679,32 @@ mod tests {
         let bytes = ef.to_bytes();
         let ef2 = EliasFano::from_bytes(&bytes).unwrap();
         assert!(ef2.is_empty());
+    }
+
+    /// Flipping any single bit of a serialized EliasFano must either be
+    /// rejected by `from_bytes` or load a structure whose accessors do not
+    /// panic. Corrupt counts or index words used to index out of bounds.
+    #[test]
+    fn from_bytes_corruption_errors_instead_of_panicking() {
+        let values: Vec<u64> = (0..200u64).map(|i| i * 37 + (i % 5)).collect();
+        let ef = EliasFano::new(&values, 10_000);
+        let bytes = ef.to_bytes();
+        for byte in 0..bytes.len() {
+            for bit in 0..8 {
+                let mut corrupt = bytes.clone();
+                corrupt[byte] ^= 1 << bit;
+                let Ok(ef2) = EliasFano::from_bytes(&corrupt) else {
+                    continue;
+                };
+                for i in 0..ef2.len() {
+                    let _ = ef2.get(i);
+                }
+                let _ = ef2.iter().count();
+                for target in [0, 500, 5_000, 9_999, 20_000] {
+                    let _ = ef2.next_geq(target);
+                    let _ = ef2.rank(target);
+                }
+            }
+        }
     }
 }

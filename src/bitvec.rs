@@ -188,12 +188,23 @@ impl BitVector {
             )));
         }
 
-        Ok(Self {
-            storage,
-            select1_index,
-            select0_index,
-            len,
-        })
+        // The rank/select directory is derived data: rebuild it from the data
+        // words and require the persisted copy to match. Trusting it would let
+        // a corrupt header answer rank/select wrongly or index out of bounds.
+        let bits: Vec<u64> = (0..num_blocks)
+            .flat_map(|b| storage[b * 10 + 2..b * 10 + 10].iter().copied())
+            .collect();
+        let rebuilt = Self::new(&bits, len);
+        if rebuilt.storage != storage
+            || rebuilt.select1_index != select1_index
+            || rebuilt.select0_index != select0_index
+        {
+            return Err(crate::error::Error::InvalidEncoding(
+                "bitvec rank/select index does not match its data bits".to_string(),
+            ));
+        }
+
+        Ok(rebuilt)
     }
 
     /// Serialize this bitvector to a stable binary encoding (little-endian).
@@ -701,8 +712,54 @@ mod tests {
     fn test_bitvector_from_parts_rejects_bad_len() {
         // 10 words = 1 block, max 512 bits. len=513 should fail.
         let storage = vec![0u64; 20]; // 2 blocks (1 real + sentinel)
-        assert!(BitVector::from_parts(storage.clone(), vec![], vec![], 512).is_ok());
-        assert!(BitVector::from_parts(storage, vec![], vec![], 513).is_err());
+                                      // An all-zero 512-bit vector has select1 index [0] and select0 index [0, 1].
+        assert!(BitVector::from_parts(storage.clone(), vec![0], vec![0, 1], 512).is_ok());
+        assert!(BitVector::from_parts(storage, vec![0], vec![0, 1], 513).is_err());
+    }
+
+    #[test]
+    fn test_bitvector_from_parts_rejects_missing_select_index() {
+        // Empty select indexes would make select0(0) index out of bounds.
+        let storage = vec![0u64; 20];
+        assert!(BitVector::from_parts(storage, vec![], vec![], 512).is_err());
+    }
+
+    /// Flipping any single bit of a serialized BitVector must either be
+    /// rejected by `from_bytes` or load a vector whose rank/select answers
+    /// agree with its own bits. Data-word flips change the bits themselves and
+    /// are not detectable without a checksum, but the persisted rank/select
+    /// directory must never be trusted over the bits it indexes.
+    #[test]
+    fn test_bitvector_from_bytes_never_trusts_corrupt_index() {
+        let data: Vec<u64> = (0..20u64)
+            .map(|i| i.wrapping_mul(0x9E37_79B9_7F4A_7C15))
+            .collect();
+        let len = 20 * 64 - 7;
+        let bytes = BitVector::new(&data, len).to_bytes();
+        for byte in 0..bytes.len() {
+            for bit in 0..8 {
+                let mut corrupt = bytes.clone();
+                corrupt[byte] ^= 1 << bit;
+                let Ok(bv) = BitVector::from_bytes(&corrupt) else {
+                    continue;
+                };
+                let mut ones = 0;
+                let mut zeros = 0;
+                for i in 0..bv.len() {
+                    assert_eq!(bv.rank1(i), ones, "rank1({i}) after flip {byte}:{bit}");
+                    if bv.get(i) {
+                        assert_eq!(bv.select1(ones), Some(i), "flip {byte}:{bit}");
+                        ones += 1;
+                    } else {
+                        assert_eq!(bv.select0(zeros), Some(i), "flip {byte}:{bit}");
+                        zeros += 1;
+                    }
+                }
+                assert_eq!(bv.rank1(bv.len()), ones);
+                assert_eq!(bv.select1(ones), None);
+                assert_eq!(bv.select0(zeros), None);
+            }
+        }
     }
 
     #[test]
