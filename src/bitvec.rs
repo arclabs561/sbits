@@ -527,15 +527,6 @@ impl BitVector {
     }
 
     fn select_in_word(word: u64, k: usize) -> usize {
-        #[cfg(all(target_arch = "x86_64", target_feature = "bmi2"))]
-        {
-            unsafe {
-                let mask = 1u64 << k;
-                let res = core::arch::x86_64::_pdep_u64(mask, word);
-                return res.trailing_zeros() as usize;
-            }
-        }
-
         // Use the SELECT_IN_BYTE lookup table: find which byte holds the k-th set bit,
         // then look up the exact bit position within that byte. Max 8 iterations.
         let mut remaining = k;

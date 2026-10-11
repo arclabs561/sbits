@@ -23,6 +23,7 @@
 //! - Grossi, R., et al. (2003). "High-order entropy-compressed text indexes."
 
 #![no_std]
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(clippy::all)]
 
