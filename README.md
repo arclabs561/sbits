@@ -6,16 +6,10 @@
 
 Succinct data structures.
 
-Provides bit vectors with rank/select, Elias-Fano sequences, partitioned
-Elias-Fano sequences, and wavelet trees.
-
-A succinct structure stores data close to its information-theoretic minimum
-while answering queries directly on the compressed form, with no decompression
-step. The queries here are rank (count set bits or symbols up to a position),
-select (find the k-th occurrence), access (read a value by index), and
-successor/predecessor over a sorted sequence. These back compressed text
-indexes, inverted-index posting lists, and similar space-constrained lookups.
-The structures are static: changing a value means rebuilding.
+Store bits, sorted integers or symbol sequences compactly and query them without
+decompressing the whole structure. Rank counts occurrences before a position;
+select locates the k-th occurrence. The structures are static: changing a value
+means rebuilding.
 
 Dual-licensed under MIT or Apache-2.0.
 
@@ -24,15 +18,15 @@ Dual-licensed under MIT or Apache-2.0.
 | Structure | What it does |
 |-----------|-------------|
 | `BitVector` | Rank/select over bits in O(1)/O(log n) with Rank9 interleaved layout |
-| `EliasFano` | Sorted integers in near-optimal space with select-based access and successor queries |
+| `EliasFano` | Compressed sorted integers with indexed access and successor queries |
 | `PartitionedEliasFano` | Block-local Elias-Fano for clustered sequences |
-| `WaveletTree` | Rank/select over arbitrary alphabets in O(log sigma) |
+| `WaveletTree` | Rank, select and indexed access over symbol sequences |
 
 ## Quickstart
 
 ```toml
 [dependencies]
-sbits = "0.2.3"
+sbits = "0.2"
 ```
 
 ```rust
@@ -82,9 +76,14 @@ let ef2 = EliasFano::from_bytes(&bytes).unwrap();
 assert_eq!(ef2.get(0).unwrap(), 10);
 ```
 
+## Feature flags
+
+The default `std` feature enables standard-library integration. Disable default
+features for `no_std` with `alloc`. Enable `serde` for Serde serialization.
+
 ## Examples
 
 Runnable examples live in [`examples/`](examples/):
 
 - `sorted_integers` packs a simulated posting list (1000 doc IDs out of a 1M-document corpus) with Elias-Fano.
-- `wavelet_sequence` runs access, rank, and select over a small-alphabet symbol stream.
+- `wavelet_sequence` queries a sequence drawn from a small alphabet.

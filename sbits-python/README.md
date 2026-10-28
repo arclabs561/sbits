@@ -1,6 +1,7 @@
 # sbits
 
-Succinct data structures -- bit vector rank/select, Elias-Fano compressed integer sequences, and wavelet trees -- with near-optimal space and constant or logarithmic query time. Backed by a Rust implementation.
+Store bit vectors, sorted integers and symbol sequences compactly. Query them
+with rank, select and indexed access.
 
 Python bindings for the [sbits](https://crates.io/crates/sbits) Rust crate.
 
@@ -19,7 +20,7 @@ bv.rank(4)    # 3 -- number of set bits in [0, 4)
 bv.select(2)  # 3 -- position of the 3rd set bit (0-indexed)
 bv.get(0)     # True
 
-# Elias-Fano compressed sorted integers with O(1) access
+# Elias-Fano compressed sorted integers
 ef = EliasFano([10, 20, 30, 100, 1000])
 ef[0]         # 10
 ef[2]         # 30
@@ -43,19 +44,19 @@ wt.select(3, 0)  # 0 -- position of first 3
 | `BitVector.count_ones()` | Total number of set bits |
 | `BitVector.to_numpy()` | Export as numpy boolean array |
 | `EliasFano(values)` | Construct from sorted non-negative integers |
-| `EliasFano.get(i)` | Value at index i, O(1) |
-| `EliasFano.contains(v)` | Membership test, O(log n) |
-| `EliasFano.successor(v)` | Smallest value >= v, O(log bucket) |
-| `EliasFano.predecessor(v)` | Largest value <= v, O(log bucket) |
+| `EliasFano.get(i)` | Value at index i |
+| `EliasFano.contains(v)` | Membership test |
+| `EliasFano.successor(v)` | Smallest value >= v |
+| `EliasFano.predecessor(v)` | Largest value <= v |
 | `EliasFano.to_numpy()` | Export as numpy uint64 array |
 | `WaveletTree(data, sigma)` | Construct from symbol sequence and alphabet size |
 | `WaveletTree.rank(sym, i)` | Count occurrences of sym in [0, i), O(log sigma) |
-| `WaveletTree.select(sym, k)` | Position of k-th occurrence of sym, O(log sigma) |
+| `WaveletTree.select(sym, k)` | Position of k-th occurrence of sym |
 | `WaveletTree.access(i)` | Symbol at position i, O(log sigma) |
 
-## numpy support
+## NumPy support
 
-Constructors accept numpy arrays or Python lists. Export methods (`to_numpy`) return numpy arrays. `BitVector` and `EliasFano` support `len()`, indexing, and `in`.
+Constructors accept NumPy arrays or Python lists. Export methods (`to_numpy`) return NumPy arrays. `BitVector` and `EliasFano` support `len()`, indexing, and `in`.
 
 ## License
 

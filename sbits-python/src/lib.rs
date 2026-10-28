@@ -224,14 +224,14 @@ impl EliasFano {
         })
     }
 
-    /// Return the value at index i. O(1) time.
+    /// Return the value at index i.
     fn get(&self, i: usize) -> PyResult<u64> {
         self.inner
             .get(i)
             .map_err(|e| PyIndexError::new_err(e.to_string()))
     }
 
-    /// Return True if the value is present. O(log n) time.
+    /// Return True if the value is present.
     fn contains(&self, value: u64) -> bool {
         self.inner.contains(value)
     }
@@ -342,7 +342,7 @@ impl PartitionedEliasFano {
         })
     }
 
-    /// Return the value at index i. O(1) time.
+    /// Return the value at index i.
     fn get(&self, i: usize) -> PyResult<u64> {
         self.inner
             .get(i)
@@ -425,7 +425,7 @@ impl WaveletTree {
         self.inner.rank(symbol, i)
     }
 
-    /// Position of the k-th occurrence of symbol (0-indexed). O(log(sigma)) time.
+    /// Position of the k-th occurrence of symbol (0-indexed).
     ///
     /// Returns None if fewer than k+1 occurrences exist.
     fn select(&self, symbol: u32, k: usize) -> Option<usize> {

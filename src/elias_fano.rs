@@ -423,7 +423,7 @@ impl EliasFano {
 
     /// Return true if `target` is in the encoded sequence.
     ///
-    /// Uses `successor` internally: O(log n).
+    /// Uses [`successor`](Self::successor) internally.
     pub fn contains(&self, target: u64) -> bool {
         self.successor(target) == Some(target)
     }

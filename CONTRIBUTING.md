@@ -25,7 +25,7 @@ cargo test --all-features
 
 ## Testing
 
-- `cargo test --all-features` for the full matrix.
+- `cargo test --all-features` tests with every feature enabled.
 - Test names should describe the property under test, not the function under test.
 
 ## Pull requests
