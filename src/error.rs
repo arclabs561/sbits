@@ -46,7 +46,7 @@ impl<'a> ByteReader<'a> {
     }
 
     pub fn take(&mut self, n: usize) -> Result<&'a [u8]> {
-        if self.off + n > self.data.len() {
+        if n > self.data.len() - self.off {
             return Err(Error::InvalidEncoding(
                 "unexpected end of input".to_string(),
             ));
