@@ -44,3 +44,25 @@ fn wavelet_tree_rejects_overflowing_level_length() {
     bytes[24..32].copy_from_slice(&u64::MAX.to_le_bytes());
     assert!(WaveletTree::from_bytes(&bytes).is_err());
 }
+
+#[test]
+fn partitioned_elias_fano_rejects_block_bases_outside_universe() {
+    let bytes = PartitionedEliasFano::new(&[10, 20], 100, 2).to_bytes();
+    // The single block base follows the 36-byte fixed header.
+    let with_base = |base: u64| {
+        let mut b = bytes.clone();
+        b[36..44].copy_from_slice(&base.to_le_bytes());
+        b
+    };
+    assert_eq!(
+        PartitionedEliasFano::from_bytes(&with_base(79))
+            .unwrap()
+            .iter()
+            .collect::<Vec<_>>(),
+        [79, 89]
+    );
+    // base + rel would overflow u64 in `get`.
+    assert!(PartitionedEliasFano::from_bytes(&with_base(u64::MAX - 1)).is_err());
+    // 95 + 10 decodes past the universe of 100.
+    assert!(PartitionedEliasFano::from_bytes(&with_base(95)).is_err());
+}

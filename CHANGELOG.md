@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `WaveletTree::rank` and `select` return 0 and `None` for a symbol `>= sigma`.
+  The traversal read only the low `depth` bits, so such a symbol aliased one in
+  the alphabet, and with `sigma <= 1` every symbol matched.
+- `PartitionedEliasFano::from_bytes` (and serde deserialization) reject blocks
+  whose base plus decoded offset overflows `u64` or reaches the universe size;
+  `get` panicked on such input.
+
 ## [0.2.4] - 2026-10-09
 
 ### Changed

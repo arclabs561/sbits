@@ -239,6 +239,18 @@ impl PartitionedEliasFano {
                 "PEF n ({n}) does not match sum of block lengths ({actual_n})"
             )));
         }
+        // `get` and `iter` return `base + rel`; every decoded value must fit in
+        // u64 and lie below the universe, as for values passed to `new`.
+        for (&base, block) in bases.iter().zip(&blocks) {
+            if block
+                .iter()
+                .any(|rel| base.checked_add(rel).is_none_or(|v| v >= universe_size))
+            {
+                return Err(Error::InvalidEncoding(format!(
+                    "PEF block with base {base} decodes a value outside universe {universe_size}"
+                )));
+            }
+        }
 
         Ok(Self {
             universe_size,

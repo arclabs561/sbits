@@ -166,7 +166,14 @@ impl WaveletTree {
     }
 
     /// Return the number of occurrences of `symbol` in the range \[0, i).
+    ///
+    /// A symbol `>= sigma` occurs zero times.
     pub fn rank(&self, symbol: u32, mut i: usize) -> usize {
+        // The traversal reads only the low `depth` bits of `symbol`, so a
+        // symbol outside the alphabet would alias one inside it.
+        if symbol >= self.sigma {
+            return 0;
+        }
         // Track the start of the symbol's region alongside i to avoid a second traversal.
         let mut start = 0usize;
         for level in 0..self.depth {
@@ -183,7 +190,12 @@ impl WaveletTree {
     }
 
     /// Return the position of the `k`-th occurrence of `symbol` (0-indexed).
+    ///
+    /// Returns `None` for a symbol `>= sigma`.
     pub fn select(&self, symbol: u32, k: usize) -> Option<usize> {
+        if symbol >= self.sigma {
+            return None;
+        }
         // Find the position in the bottom level, then map back up.
         let start = self.symbol_start(symbol);
         let mut i = start + k;
@@ -398,6 +410,21 @@ mod tests {
         assert_eq!(wt.rank(0, 6), 3);
         assert_eq!(wt.rank(1, 6), 2);
         assert_eq!(wt.rank(2, 6), 1);
+    }
+
+    #[test]
+    fn test_wavelet_tree_symbol_outside_alphabet_never_occurs() {
+        // depth 2: symbol 4 (0b100) shares its low bits with 0.
+        let wt = WaveletTree::new(&[0, 1, 2, 0, 0], 3);
+        assert_eq!(wt.rank(4, 5), 0);
+        assert_eq!(wt.select(4, 0), None);
+        assert_eq!(wt.rank(3, 5), 0);
+        assert_eq!(wt.select(3, 0), None);
+        // depth 0: every symbol would match without the alphabet check.
+        let wt = WaveletTree::new(&[0, 0, 0], 1);
+        assert_eq!(wt.rank(0, 3), 3);
+        assert_eq!(wt.rank(7, 3), 0);
+        assert_eq!(wt.select(7, 0), None);
     }
 
     #[test]
