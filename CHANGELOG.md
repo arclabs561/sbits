@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-11-01
+
+### Changed
+
+- Removed the BMI2 `pdep` fast path in `select_in_word`, which was compiled
+  only when BMI2 was enabled for the whole build; the crate now forbids unsafe
+  code. Default builds already used the lookup table and are unchanged.
+
 ### Fixed
 
+- `from_bytes` for `EliasFano`, `PartitionedEliasFano` and `WaveletTree`
+  rejects nested byte lengths that overflow when added to the read offset,
+  instead of panicking.
 - `WaveletTree::rank` and `select` return 0 and `None` for a symbol `>= sigma`.
   The traversal read only the low `depth` bits, so such a symbol aliased one in
   the alphabet, and with `sigma <= 1` every symbol matched.
