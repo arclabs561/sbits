@@ -83,7 +83,24 @@ features for `no_std` with `alloc`. Enable `serde` for Serde serialization.
 
 ## Examples
 
-Runnable examples live in [`examples/`](examples/):
+`sorted_integers` packs a simulated posting list (about 1000 document IDs in a
+universe of one million) with Elias-Fano:
 
-- `sorted_integers` packs a simulated posting list (1000 doc IDs out of a 1M-document corpus) with Elias-Fano.
-- `wavelet_sequence` queries a sequence drawn from a small alphabet.
+```bash
+cargo run --release --example sorted_integers
+```
+
+```text
+Stored 1003 sorted values (universe 0..1000000)
+...
+Successor queries:
+  successor(43) = Some(1000)
+  successor(5000) = Some(5000)
+  successor(999998) = Some(999999)
+
+Space: 1724 bytes compressed vs 8024 bytes raw (4.7x smaller)
+```
+
+`wavelet_sequence` queries a sequence drawn from a small alphabet.
+
+Python bindings are in [`sbits-python/`](sbits-python/) and on PyPI as `sbits`.
