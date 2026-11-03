@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `EliasFano::from_bytes` (and serde deserialization) rejects encodings
+  whose decoded values are out of order or not below `universe_size`.
+  Consistent counts were the only check, so patched low bits could load and
+  decode values that `EliasFano::new` would never accept.
+- `PartitionedEliasFano::from_bytes` (and serde deserialization) rejects
+  blocks that do not hold exactly `block_size` values, except a non-empty
+  last block. `get` maps an index to a block by `block_size`, so uneven
+  blocks made `get` disagree with `iter`.
+
 ## [0.2.5] - 2026-11-01
 
 ### Changed

@@ -532,14 +532,26 @@ impl EliasFano {
                 "EliasFano counts (n={n}, l={l}) do not match its lower/upper bit arrays"
             )));
         }
-        Ok(Self {
+        let ef = Self {
             universe_size,
             upper_bits,
             lower_bits,
             l,
             n,
             num_upper_zeros,
-        })
+        };
+        // `new` accepts only sorted values below the universe; consistent
+        // counts do not imply that, so check the decoded values themselves.
+        let mut prev = 0;
+        for v in ef.iter() {
+            if v >= universe_size || v < prev {
+                return Err(Error::InvalidEncoding(format!(
+                    "EliasFano decodes {v}, out of order or outside universe {universe_size}"
+                )));
+            }
+            prev = v;
+        }
+        Ok(ef)
     }
 }
 
