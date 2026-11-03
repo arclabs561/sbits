@@ -233,6 +233,16 @@ impl PartitionedEliasFano {
                 "block_size must be >= 1".to_string(),
             ));
         }
+        // `get` locates index i at block i / block_size, offset i % block_size,
+        // so every block but the last must be full and the last non-empty.
+        if let Some((last, full)) = blocks.split_last() {
+            if full.iter().any(|b| b.len() != block_size) || !(1..=block_size).contains(&last.len())
+            {
+                return Err(Error::InvalidEncoding(format!(
+                    "PEF blocks must hold {block_size} values each, the last 1 to {block_size}"
+                )));
+            }
+        }
         let actual_n: usize = blocks.iter().map(|b| b.len()).sum();
         if actual_n != n {
             return Err(Error::InvalidEncoding(format!(
