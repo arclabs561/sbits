@@ -1,6 +1,6 @@
 [package]
 name = "sbits"
-version = "0.2.6"
+version = "0.2.7"
 authors = ["Arc <attobop@gmail.com>"]
 edition = "2021"
 description = "Succinct data structures"
