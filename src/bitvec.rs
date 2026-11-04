@@ -326,6 +326,9 @@ impl BitVector {
     }
 
     /// Return the number of set bits in the range [0, i).
+    ///
+    /// For `i > len` the vector reads as zero-extended, so the result is
+    /// `rank1(len)`.
     pub fn rank1(&self, i: usize) -> usize {
         if i == 0 {
             return 0;
@@ -352,6 +355,9 @@ impl BitVector {
     }
 
     /// Return the number of unset bits in the range [0, i).
+    ///
+    /// For `i > len` the vector reads as zero-extended, as in sux's
+    /// `RankZero`, so the result is `i - rank1(len)`, which can exceed `len`.
     pub fn rank0(&self, i: usize) -> usize {
         i - self.rank1(i)
     }

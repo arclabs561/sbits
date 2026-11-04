@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `WaveletTree::rank(symbol, i)` with `i > len` returns the total count of
+  `symbol`. Symbols that take the 0-branch at a level counted positions past
+  the end as occurrences (for `[0, 1, 1, 0, 2]`, `rank(0, 100)` was 97),
+  because `BitVector::rank0` treats positions past its length as zeros.
+- `WaveletTree::from_bytes` (and serde deserialization) rejects encodings
+  that decode a symbol `>= sigma`. A `sigma` lowered without changing the
+  depth loaded, and `access` then returned symbols outside the alphabet.
+  Loading now decodes each symbol once.
+
 ## [0.2.6] - 2026-11-03
 
 ### Fixed

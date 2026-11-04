@@ -167,13 +167,17 @@ impl WaveletTree {
 
     /// Return the number of occurrences of `symbol` in the range \[0, i).
     ///
-    /// A symbol `>= sigma` occurs zero times.
-    pub fn rank(&self, symbol: u32, mut i: usize) -> usize {
+    /// A symbol `>= sigma` occurs zero times, and an `i` past `len` counts
+    /// the whole sequence.
+    pub fn rank(&self, symbol: u32, i: usize) -> usize {
         // The traversal reads only the low `depth` bits of `symbol`, so a
         // symbol outside the alphabet would alias one inside it.
         if symbol >= self.sigma {
             return 0;
         }
+        // `BitVector::rank0` treats positions past its length as zeros, which
+        // would count phantom occurrences of symbols on the 0-branch.
+        let mut i = i.min(self.len);
         // Track the start of the symbol's region alongside i to avoid a second traversal.
         let mut start = 0usize;
         for level in 0..self.depth {
@@ -303,13 +307,22 @@ impl WaveletTree {
                 "WaveletMatrix levels do not match len={len}, sigma={sigma}, depth={depth}"
             )));
         }
-        Ok(Self {
+        let wt = Self {
             levels,
             zeros,
             len,
             sigma,
             depth,
-        })
+        };
+        // `new` accepts only symbols below sigma; a depth that matches sigma
+        // still leaves room for symbols in `sigma..2^depth`, so check them.
+        if let Some(i) = (0..len).find(|&i| wt.access(i) >= sigma) {
+            return Err(crate::error::Error::InvalidEncoding(format!(
+                "WaveletMatrix decodes symbol {} at index {i}, not below sigma {sigma}",
+                wt.access(i)
+            )));
+        }
+        Ok(wt)
     }
 
     /// Compute the start position of a symbol's region in the bottom level.
