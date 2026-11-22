@@ -49,6 +49,6 @@ numpy = ["numpy>=1.21"]
 dev = [
     "numpy>=1.21",
     "pytest>=7.4.4",
-    "pytest-cov>=4.0.0",
+    "pytest-cov>=7.1.0",
     "mypy>=1.0.0",
 ]
